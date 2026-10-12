@@ -1,0 +1,12 @@
+{
+  "name": "gamelan-arena",
+  "version": "1.0.0",
+  "description": "LAN multiplayer arena game with colored squares",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "ws": "^8.16.0"
+  }
+}

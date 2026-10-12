@@ -1,0 +1,757 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Annotation Review — Detection Results</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #0a0a0a;
+    color: #ccc;
+    font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+    overflow: hidden;
+    display: flex;
+    height: 100vh;
+    cursor: crosshair;
+  }
+
+  /* ── Sidebar ── */
+  #sidebar {
+    width: 240px;
+    background: #111;
+    border-right: 1px solid #2a2a2a;
+    display: flex;
+    flex-direction: column;
+    flex-shrink: 0;
+  }
+  #sidebar-header {
+    padding: 12px 14px;
+    border-bottom: 1px solid #2a2a2a;
+    font-size: 11px;
+    color: #666;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+  }
+  #sidebar-header span { color: #888; font-size: 10px; float: right; margin-top: 1px; }
+
+  .sidebar-section {
+    padding: 10px 14px;
+    border-bottom: 1px solid #1a1a1a;
+    max-height: 45vh;
+    overflow-y: auto;
+  }
+  .sidebar-section h4 {
+    font-size: 10px; color: #555; text-transform: uppercase;
+    letter-spacing: 1px; margin-bottom: 8px;
+  }
+
+  .class-row {
+    display: flex; align-items: center; gap: 6px;
+    padding: 3px 0; font-size: 11px;
+  }
+  .class-dot {
+    width: 10px; height: 10px; border: 2px solid;
+    background: transparent; flex-shrink: 0;
+  }
+  .class-label { color: #777; flex: 1; }
+  .class-label.me { color: #fff; }
+  .class-label.dead { color: #444; text-decoration: line-through; }
+  .class-kd { color: #555; font-size: 10px; white-space: nowrap; }
+
+  .hp-bar-wrap {
+    width: 40px; height: 6px; background: #222;
+    border-radius: 1px; overflow: hidden; flex-shrink: 0;
+  }
+  .hp-bar-fill { height: 100%; transition: width 0.15s; }
+
+  #stats {
+    margin-top: auto;
+    padding: 10px 14px;
+    border-top: 1px solid #2a2a2a;
+    font-size: 10px; color: #444;
+    line-height: 1.8;
+  }
+
+  #skillbar {
+    padding: 8px 14px;
+    border-top: 1px solid #2a2a2a;
+    font-size: 10px; color: #555;
+  }
+  #skillbar h4 {
+    font-size: 10px; color: #555; text-transform: uppercase;
+    letter-spacing: 1px; margin-bottom: 6px;
+  }
+  .skill-row {
+    display: flex; align-items: center; gap: 8px;
+    padding: 2px 0;
+  }
+  .skill-key {
+    width: 20px; height: 20px;
+    border: 1px solid #444;
+    border-radius: 2px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 11px; color: #888;
+    background: #1a1a1a;
+  }
+  .skill-key.ready { border-color: #4a9eff; color: #4a9eff; }
+  .skill-desc { color: #555; font-size: 10px; }
+  .shot-dots { display: flex; gap: 3px; margin-left: auto; }
+  .shot-dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: #333; border: 1px solid #555;
+  }
+  .shot-dot.filled { background: #4a9eff; border-color: #4a9eff; }
+  .shot-dot.next-big { background: #ff4444; border-color: #ff4444; }
+
+  /* ── Main ── */
+  #main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+
+  #toolbar {
+    display: flex; align-items: center;
+    padding: 6px 12px; background: #111;
+    border-bottom: 1px solid #2a2a2a;
+    gap: 16px; font-size: 11px; color: #555;
+  }
+  .tool-item { display: flex; align-items: center; gap: 4px; }
+  .tool-active { color: #4a9eff; }
+  .tool-sep { width: 1px; height: 16px; background: #2a2a2a; }
+  #coordDisplay { margin-left: auto; color: #444; font-size: 10px; }
+  #zoomDisplay { color: #444; font-size: 10px; margin-left: 8px; }
+
+  #canvasWrap {
+    flex: 1; display: flex;
+    align-items: center; justify-content: center;
+    background: #0a0a0a; position: relative;
+    overflow: hidden;
+  }
+  canvas { display: block; }
+
+  /* ── Overlay ── */
+  #overlay {
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,0.9);
+    display: flex; align-items: center; justify-content: center;
+    z-index: 100; font-size: 13px; color: #555;
+  }
+  #overlay.hidden { display: none; }
+  #overlayCountdown { color: #888; margin-top: 8px; font-size: 12px; }
+
+  #deathBanner {
+    display: none;
+    padding: 6px 14px;
+    background: #1a1010;
+    border-top: 1px solid #331a1a;
+    font-size: 10px; color: #884444;
+    text-align: center;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+  }
+  #deathBanner.show { display: block; }
+</style>
+</head>
+<body>
+
+<div id="overlay"><div><div id="overlayMessage">Loading detection results...</div><div id="overlayCountdown"></div></div></div>
+
+<div id="sidebar">
+  <div id="sidebar-header">
+    Detection Classes <span id="playerCount">0</span>
+  </div>
+
+  <div class="sidebar-section">
+    <h4>Detected Objects</h4>
+    <div id="playerList"></div>
+  </div>
+
+  <div id="skillbar">
+    <h4>Annotation Tools</h4>
+    <div class="skill-row">
+      <div class="skill-key ready" id="qKey">🖱</div>
+      <div class="skill-desc">Left-click → shoot</div>
+      <div class="shot-dots" id="shotDots">
+        <div class="shot-dot"></div>
+        <div class="shot-dot"></div>
+        <div class="shot-dot"></div>
+      </div>
+    </div>
+    <div style="margin-top:4px; font-size:9px; color:#444;">
+      Every 3rd click: large marker (×3 dmg)
+    </div>
+    <div class="skill-row" style="margin-top:6px;">
+      <div class="skill-key ready" id="spaceKey">␣</div>
+      <div class="skill-desc">Hold Space → beam (×5 dmg)</div>
+      <div id="chargeBar" style="width:40px;height:6px;background:#222;border-radius:1px;overflow:hidden;margin-left:auto;">
+        <div id="chargeFill" style="width:0%;height:100%;background:#ff6600;transition:width 0.05s;"></div>
+      </div>
+    </div>
+    <div id="beamCooldownTrack" style="margin-top:5px; height:5px; background:#222; border:1px solid #333; border-radius:1px; overflow:hidden;">
+      <div id="beamCooldownFill" style="width:0%; height:100%; background:#4a9eff; transition:width 0.05s linear;"></div>
+    </div>
+    <div id="beamStatus" style="margin-top:3px; font-size:9px; color:#888;">
+      Laser ready
+    </div>
+  </div>
+
+  <div id="deathBanner">object lost — re-detecting...</div>
+
+  <div id="stats">
+    <div>Model: YOLOv8x-seg</div>
+    <div>Threshold: 0.75</div>
+    <div>NMS IoU: 0.45</div>
+    <div>Frame: <span id="frameNum">0</span></div>
+    <div id="fpsDisplay">FPS: 20</div>
+  </div>
+</div>
+
+<div id="main">
+  <div id="toolbar">
+    <div class="tool-item tool-active">☐ BBox</div>
+    <div class="tool-sep"></div>
+    <div class="tool-item">⊙ Polygon</div>
+    <div class="tool-sep"></div>
+    <div class="tool-item">⊞ Segment</div>
+    <div class="tool-sep"></div>
+    <div class="tool-item">↻ Track</div>
+    <div id="coordDisplay">x: 0 y: 0</div>
+    <div id="zoomDisplay">100%</div>
+  </div>
+
+  <div id="canvasWrap">
+    <canvas id="canvas"></canvas>
+  </div>
+</div>
+
+<script>
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+let myId = null;
+let arenaW = 160, arenaH = 90, cellSize = 15;
+let players = [];
+let bullets = [];
+let gameBeams = [];
+let ws;
+let keysDown = new Set();
+let frameCounter = 0;
+let mouseX = 80, mouseY = 45;  // default center
+let myShotCount = 0;
+let isCharging = false;
+
+// ─── Background image ────────────────────────────────────────
+let bgImage = null;
+let bgLoaded = false;
+const bgImg = new Image();
+bgImg.onload = () => { bgImage = bgImg; bgLoaded = true; render(); };
+bgImg.src = '/image.png';
+
+// ─── WebSocket ───────────────────────────────────────────────
+function connect() {
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  ws = new WebSocket(`${proto}://${location.host}`);
+
+  ws.onopen = () => {
+    document.getElementById('overlay').classList.remove('hidden');
+    document.getElementById('overlayMessage').textContent = 'Preparing detection results...';
+    resizeCanvas();
+    render();
+  };
+
+  ws.onmessage = (e) => {
+    const msg = JSON.parse(e.data);
+    if (msg.type === 'welcome') {
+      myId = msg.id;
+      arenaW = msg.arena.w;
+      arenaH = msg.arena.h;
+      cellSize = msg.arena.cell;
+      players = msg.players;
+      bullets = msg.bullets || [];
+      gameBeams = msg.beams || [];
+      resizeCanvas();
+      render();
+      updateUI();
+      updateJoinOverlay();
+    }
+    if (msg.type === 'state') {
+      if (msg.arena) {
+        arenaW = msg.arena.w;
+        arenaH = msg.arena.h;
+        cellSize = msg.arena.cell;
+      }
+      players = msg.players;
+      bullets = msg.bullets || [];
+      gameBeams = msg.beams || [];
+      updateUI();
+      updateJoinOverlay();
+      render();
+    }
+  };
+
+  ws.onclose = () => {
+    document.getElementById('overlay').classList.remove('hidden');
+    document.getElementById('overlayMessage').textContent = 'Reconnecting to annotation server...';
+    document.getElementById('overlayCountdown').textContent = '';
+    setTimeout(connect, 1500);
+  };
+}
+
+function updateJoinOverlay() {
+  const me = players.find(p => p.id === myId);
+  const overlay = document.getElementById('overlay');
+  const message = document.getElementById('overlayMessage');
+  const countdown = document.getElementById('overlayCountdown');
+  if (!me || me.joining) {
+    overlay.classList.remove('hidden');
+    message.textContent = 'Entering arena...';
+    countdown.textContent = me ? `${Math.ceil(me.joinTicks / 20)} seconds` : 'Waiting for server...';
+    return;
+  }
+  overlay.classList.add('hidden');
+  countdown.textContent = '';
+}
+
+// ─── Canvas sizing ───────────────────────────────────────────
+function resizeCanvas() {
+  const container = document.getElementById('canvasWrap');
+  const maxW = container.clientWidth;
+  const maxH = container.clientHeight;
+  if (maxW < 10 || maxH < 10) return; // container not ready
+
+  const gameW = arenaW * cellSize;  // 160*15 = 2400
+  const gameH = arenaH * cellSize;  // 90*15  = 1350
+  const scale = Math.min(maxW / gameW, maxH / gameH);
+
+  canvas.width = gameW;
+  canvas.height = gameH;
+  canvas.style.width = Math.floor(gameW * scale) + 'px';
+  canvas.style.height = Math.floor(gameH * scale) + 'px';
+}
+window.addEventListener('resize', () => { resizeCanvas(); render(); });
+
+// ─── Mouse tracking ─────────────────────────────────────────
+document.addEventListener('mousemove', (e) => {
+  const rect = canvas.getBoundingClientRect();
+  if (rect.width === 0 || rect.height === 0) return;
+  const sx = canvas.width / rect.width;
+  const sy = canvas.height / rect.height;
+  const px = (e.clientX - rect.left) * sx;
+  const py = (e.clientY - rect.top) * sy;
+  mouseX = px / cellSize;
+  mouseY = py / cellSize;
+  document.getElementById('coordDisplay').textContent =
+    `x: ${Math.floor(px)}  y: ${Math.floor(py)}`;
+
+  // Update charge aim direction while charging
+  if (isCharging && ws && ws.readyState === 1) {
+    ws.send(JSON.stringify({ type: 'charge_aim', tx: mouseX, ty: mouseY }));
+  }
+});
+
+// ─── Rendering ───────────────────────────────────────────────
+function render() {
+  const W = canvas.width;
+  const H = canvas.height;
+  if (W === 0 || H === 0) return;
+
+  frameCounter++;
+  document.getElementById('frameNum').textContent = frameCounter;
+
+  // Background: image or fallback dark
+  if (bgLoaded && bgImage) {
+    ctx.drawImage(bgImage, 0, 0, W, H);
+  } else {
+    ctx.fillStyle = '#0a0a0a';
+    ctx.fillRect(0, 0, W, H);
+  }
+
+  // ── Draw bullets ──
+  for (const b of bullets) {
+    const bpx = b.x * cellSize;
+    const bpy = b.y * cellSize;
+    const bsz = b.size * cellSize;
+
+    ctx.strokeStyle = b.color;
+    ctx.lineWidth = b.big ? 2.5 : 1.5;
+    ctx.strokeRect(bpx - bsz / 2, bpy - bsz / 2, bsz, bsz);
+
+    if (b.big) {
+      const r = bsz * 0.35;
+      ctx.beginPath();
+      ctx.moveTo(bpx - r, bpy); ctx.lineTo(bpx + r, bpy);
+      ctx.moveTo(bpx, bpy - r); ctx.lineTo(bpx, bpy + r);
+      ctx.stroke();
+    }
+  }
+
+  // ── Draw alive players ──
+  for (const p of players) {
+    if (p.dead) continue;
+
+    const px = p.x * cellSize;
+    const py = p.y * cellSize;
+    const pw = (p.w || 3) * cellSize;
+    const ph = (p.h || 3) * cellSize;
+    const color = p.color;
+
+    // Bounding box stroke
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2;
+    ctx.strokeRect(px, py, pw, ph);
+
+    // Corner markers
+    const cLen = Math.min(8, pw * 0.25, ph * 0.25);
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = color;
+    ctx.beginPath();
+    ctx.moveTo(px, py + cLen); ctx.lineTo(px, py); ctx.lineTo(px + cLen, py);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(px + pw - cLen, py); ctx.lineTo(px + pw, py); ctx.lineTo(px + pw, py + cLen);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(px, py + ph - cLen); ctx.lineTo(px, py + ph); ctx.lineTo(px + cLen, py + ph);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(px + pw - cLen, py + ph); ctx.lineTo(px + pw, py + ph); ctx.lineTo(px + pw, py + ph - cLen);
+    ctx.stroke();
+
+    // Own box: subtle fill
+    if (p.id === myId && !p.charging) {
+      ctx.save();
+      ctx.globalAlpha = 0.08;
+      ctx.fillStyle = color;
+      ctx.fillRect(px + 1, py + 1, pw - 2, ph - 2);
+      ctx.restore();
+    }
+
+    // ── Charge fill effect ──
+    if (p.chargeProgress > 0) {
+      ctx.save();
+      const cp = p.chargeProgress; // 0 → 1
+      // Fill from bottom to top, opacity ramps up
+      const fillH = ph * cp;
+      ctx.globalAlpha = 0.15 + cp * 0.55; // 0.15 → 0.70
+      ctx.fillStyle = color;
+      ctx.fillRect(px + 1, py + ph - fillH, pw - 2, fillH);
+
+      // Pulsing glow border when charging
+      const pulse = 0.5 + 0.5 * Math.sin(frameCounter * 0.4);
+      ctx.globalAlpha = 0.3 + cp * 0.5 * pulse;
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 2 + cp * 3;
+      ctx.shadowColor = color;
+      ctx.shadowBlur = cp * 15;
+      ctx.strokeRect(px - 1, py - 1, pw + 2, ph + 2);
+      ctx.shadowBlur = 0;
+
+      // Fully charged indicator — bright flash
+      if (cp >= 1) {
+        ctx.globalAlpha = 0.3 + 0.2 * pulse;
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(px + 1, py + 1, pw - 2, ph - 2);
+      }
+      ctx.restore();
+    }
+
+    // ── HP bar above box ──
+    const labelH = 12;
+    const hpBarW = pw;
+    const hpRatio = Math.max(0, p.hp / p.maxHp);
+    const hpColor = hpRatio > 0.6 ? '#00ff00' : hpRatio > 0.3 ? '#ffaa00' : '#ff3333';
+
+    // HP background
+    ctx.save();
+    ctx.globalAlpha = 0.3;
+    ctx.fillStyle = '#222';
+    ctx.fillRect(px, py - labelH - 2, hpBarW, labelH);
+    ctx.restore();
+
+    // HP fill
+    ctx.fillStyle = hpColor;
+    ctx.fillRect(px, py - labelH - 2, hpBarW * hpRatio, labelH);
+
+    // HP border
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1;
+    ctx.strokeRect(px, py - labelH - 2, hpBarW, labelH);
+
+    // HP text
+    ctx.fillStyle = '#000';
+    ctx.font = 'bold 9px Consolas, Monaco, monospace';
+    ctx.textBaseline = 'middle';
+    ctx.textAlign = 'center';
+    ctx.fillText('HP ' + p.hp + '/' + p.maxHp, px + pw / 2, py - labelH / 2 - 2);
+
+    // Class label inside box (small, top-left)
+    ctx.fillStyle = color;
+    ctx.font = '8px Consolas, Monaco, monospace';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+    ctx.fillText(p.label + ' ' + p.conf, px + 3, py + 3);
+  }
+
+  // ── Draw dead players ──
+  for (const p of players) {
+    if (!p.dead) continue;
+    const px = p.x * cellSize;
+    const py = p.y * cellSize;
+    const pw = (p.w || 3) * cellSize;
+    const ph = (p.h || 3) * cellSize;
+
+    ctx.save();
+    ctx.globalAlpha = 0.15;
+    ctx.strokeStyle = p.color;
+    ctx.lineWidth = 1;
+    ctx.setLineDash([4, 4]);
+    ctx.strokeRect(px, py, pw, ph);
+    ctx.setLineDash([]);
+    ctx.fillStyle = '#ff3333';
+    ctx.font = '9px Consolas, monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('LOST', px + pw / 2, py + ph / 2);
+    ctx.restore();
+  }
+
+  // ── Draw energy beams ──
+  for (const beam of gameBeams) {
+    const sx = beam.x * cellSize;
+    const sy = beam.y * cellSize;
+    const fade = beam.life / beam.maxLife; // 1 → 0 as beam fades
+
+    // Calculate beam endpoint (edge of arena)
+    const maxLen = Math.sqrt((arenaW * cellSize) ** 2 + (arenaH * cellSize) ** 2);
+    const ex = sx + beam.dx * maxLen;
+    const ey = sy + beam.dy * maxLen;
+
+    ctx.save();
+
+    // Outer glow layer
+    ctx.globalAlpha = fade * 0.25;
+    ctx.strokeStyle = beam.color;
+    ctx.lineWidth = 18 * fade;
+    ctx.shadowColor = beam.color;
+    ctx.shadowBlur = 25 * fade;
+    ctx.beginPath();
+    ctx.moveTo(sx, sy);
+    ctx.lineTo(ex, ey);
+    ctx.stroke();
+
+    // Middle bright layer
+    ctx.globalAlpha = fade * 0.6;
+    ctx.lineWidth = 8 * fade;
+    ctx.shadowBlur = 15 * fade;
+    ctx.beginPath();
+    ctx.moveTo(sx, sy);
+    ctx.lineTo(ex, ey);
+    ctx.stroke();
+
+    // Core white-hot center
+    ctx.globalAlpha = fade * 0.9;
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 3 * fade;
+    ctx.shadowColor = '#ffffff';
+    ctx.shadowBlur = 10 * fade;
+    ctx.beginPath();
+    ctx.moveTo(sx, sy);
+    ctx.lineTo(ex, ey);
+    ctx.stroke();
+
+    ctx.restore();
+  }
+
+  // ── Draw aim line while charging (own player only) ──
+  if (isCharging) {
+    const me = players.find(p => p.id === myId);
+    if (me && !me.dead) {
+      const cx = (me.x + me.w / 2) * cellSize;
+      const cy = (me.y + me.h / 2) * cellSize;
+      const tx = mouseX * cellSize;
+      const ty = mouseY * cellSize;
+      const ddx = tx - cx;
+      const ddy = ty - cy;
+      const dist = Math.sqrt(ddx * ddx + ddy * ddy);
+      if (dist > 1) {
+        const ndx = ddx / dist;
+        const ndy = ddy / dist;
+        const maxLen = Math.sqrt((arenaW * cellSize) ** 2 + (arenaH * cellSize) ** 2);
+        const ex = cx + ndx * maxLen;
+        const ey = cy + ndy * maxLen;
+
+        const cp = me.chargeProgress || 0;
+
+        ctx.save();
+        ctx.setLineDash([6, 8]);
+        ctx.globalAlpha = 0.2 + cp * 0.4;
+        ctx.strokeStyle = me.color;
+        ctx.lineWidth = 1 + cp * 2;
+        ctx.shadowColor = me.color;
+        ctx.shadowBlur = cp * 10;
+        ctx.beginPath();
+        ctx.moveTo(cx, cy);
+        ctx.lineTo(ex, ey);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.restore();
+      }
+    }
+  }
+
+  ctx.lineWidth = 1;
+}
+
+// ─── UI ─────────────────────────────────────────────────────
+function updateUI() {
+  const me = players.find(p => p.id === myId);
+
+  const deathBanner = document.getElementById('deathBanner');
+  if (deathBanner) deathBanner.classList.toggle('show', Boolean(me && me.dead));
+  if (deathBanner) {
+    deathBanner.textContent = me && me.dead
+      ? 'object lost — re-detecting...'
+      : '';
+  }
+
+  const el = document.getElementById('playerList');
+  document.getElementById('playerCount').textContent = players.length + ' objects';
+
+  const sorted = [...players].sort((a, b) => {
+    if (a.dead !== b.dead) return a.dead ? 1 : -1;
+    return (b.kills || 0) - (a.kills || 0);
+  });
+
+  el.innerHTML = sorted.map(p => {
+    const hpPct = Math.max(0, (p.hp / p.maxHp) * 100);
+    const hpColor = hpPct > 60 ? '#00ff00' : hpPct > 30 ? '#ffaa00' : '#ff3333';
+    const isMe = p.id === myId;
+    return '<div class="class-row">' +
+      '<div class="class-dot" style="border-color:' + p.color + (p.dead ? ';opacity:0.3' : '') + '"></div>' +
+      '<span class="class-label ' + (isMe ? 'me' : '') + ' ' + (p.dead ? 'dead' : '') + '">' +
+        escHtml(p.label) + (isMe ? ' ●' : '') + '</span>' +
+      '<div class="hp-bar-wrap"><div class="hp-bar-fill" style="width:' + hpPct + '%;background:' + (p.dead ? '#333' : hpColor) + '"></div></div>' +
+      '<span class="class-kd">' + (p.kills || 0) + '/' + (p.deaths || 0) + '</span>' +
+    '</div>';
+  }).join('');
+
+  updateShotDots();
+  updateChargeBar();
+}
+
+function updateChargeBar() {
+  const me = players.find(p => p.id === myId);
+  const fill = document.getElementById('chargeFill');
+  const key = document.getElementById('spaceKey');
+  const status = document.getElementById('beamStatus');
+  const cooldownFill = document.getElementById('beamCooldownFill');
+  if (!me || !fill || !key) return;
+  const cp = me.chargeProgress || 0;
+  const cooldown = Math.max(0, me.beamCooldown || 0);
+  fill.style.width = (cp * 100) + '%';
+  if (cooldownFill) cooldownFill.style.width = (cooldown / 100 * 100) + '%';
+  if (status) {
+    status.textContent = cooldown > 0
+      ? `Laser cooldown · ${Math.ceil(cooldown / 20)}s`
+      : 'Laser ready · 0.5s charge';
+    status.style.color = cooldown > 0 ? '#888' : '#4a9eff';
+  }
+  key.style.opacity = cooldown > 0 ? '0.45' : '1';
+  if (cp >= 1) {
+    fill.style.background = '#ff3300';
+    key.style.borderColor = '#ff3300';
+    key.style.color = '#ff3300';
+  } else if (cp > 0) {
+    fill.style.background = '#ff6600';
+    key.style.borderColor = '#ff6600';
+    key.style.color = '#ff6600';
+  } else {
+    fill.style.background = '#ff6600';
+    key.style.borderColor = '#4a9eff';
+    key.style.color = '#4a9eff';
+  }
+}
+
+function updateShotDots() {
+  const dots = document.querySelectorAll('#shotDots .shot-dot');
+  const mod = myShotCount % 3;
+  dots.forEach((dot, i) => {
+    dot.className = 'shot-dot';
+    if (i < mod) dot.classList.add('filled');
+    if (mod === 2 && i === 2) dot.classList.add('next-big');
+  });
+}
+
+function escHtml(s) {
+  const d = document.createElement('div');
+  d.textContent = s;
+  return d.innerHTML;
+}
+
+// ─── Input: WASD movement, left-click shoot ─────────────────
+function sendDir() {
+  let dx = 0, dy = 0;
+  if (keysDown.has('a') || keysDown.has('A')) dx -= 1;
+  if (keysDown.has('d') || keysDown.has('D')) dx += 1;
+  if (keysDown.has('w') || keysDown.has('W')) dy -= 1;
+  if (keysDown.has('s') || keysDown.has('S')) dy += 1;
+  if (ws && ws.readyState === 1) {
+    ws.send(JSON.stringify({ type: 'dir', dx, dy }));
+  }
+}
+
+document.addEventListener('keydown', (e) => {
+  if (document.activeElement.tagName === 'INPUT') return;
+
+  if (['a','A','d','D','w','W','s','S'].includes(e.key)) {
+    e.preventDefault();
+    if (!keysDown.has(e.key)) {
+      keysDown.add(e.key);
+      sendDir();
+    }
+  }
+
+  // Space = charge beam
+  if (e.key === ' ' && !e.repeat) {
+    e.preventDefault();
+    if (!isCharging && ws && ws.readyState === 1) {
+      isCharging = true;
+      ws.send(JSON.stringify({ type: 'charge_start', tx: mouseX, ty: mouseY }));
+    }
+  }
+});
+
+document.addEventListener('keyup', (e) => {
+  if (keysDown.has(e.key)) {
+    keysDown.delete(e.key);
+    sendDir();
+  }
+
+  // Space release = fire beam (if charged)
+  if (e.key === ' ') {
+    if (isCharging && ws && ws.readyState === 1) {
+      ws.send(JSON.stringify({ type: 'charge_release', tx: mouseX, ty: mouseY }));
+      isCharging = false;
+    }
+  }
+});
+
+// ─── Shooting: left-click ────────────────────────────────────
+canvas.addEventListener('mousedown', (e) => {
+  if (e.button !== 0) return; // left-click only
+  e.preventDefault();
+  shoot();
+});
+
+// Prevent context menu on canvas so right-click doesn't interfere
+canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+
+function shoot() {
+  if (!ws || ws.readyState !== 1) return;
+  ws.send(JSON.stringify({ type: 'shoot', tx: mouseX, ty: mouseY }));
+  myShotCount++;
+  updateShotDots();
+}
+
+// ─── Start ───────────────────────────────────────────────────
+connect();
+</script>
+</body>
+</html>
