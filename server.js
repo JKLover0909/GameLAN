@@ -53,10 +53,10 @@ const MODES = ['free', 'team'];
 // Cooldowns for shield/upgrade start after the effect ends.
 const SKILL_COOLDOWN = { circle: 100, square: 40, rectangle: 200, triangle: 80 };
 const SHIELD_TICKS = 60;          // circle: 3s shield
-const SHIELD_SPEED_MULT = 1.15;   // circle moves 15% faster while shielded
+const SHIELD_SPEED_MULT = 1.3;    // circle moves 30% faster while shielded
 const SHIELD_PADDING = 1.2;       // cells beyond the body radius
 const SHIELD_HEAL = 2;
-const SHIELD_BLAST_DAMAGE = 2;    // shield explodes when it expires or breaks
+const SHIELD_BLAST_DAMAGE = 3;    // shield explodes when it expires or breaks
 const SHIELD_BLAST_EXTRA = 1.5;   // blast reach beyond the shield ring (cells)
 const BLAST_DISPLAY_TICKS = 12;
 const DASH_DISTANCE_MULT = 3;     // square: 3× own size
