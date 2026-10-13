@@ -362,6 +362,16 @@
     <div id="beamStatus" style="margin-top:3px; font-size:9px; color:#888;">
       Laser ready
     </div>
+    <div class="skill-row" style="margin-top:8px;">
+      <div class="skill-key ready" id="eKey">E</div>
+      <div class="skill-desc" id="skillDesc">Shape tool</div>
+    </div>
+    <div id="skillCooldownTrack" style="margin-top:5px; height:5px; background:#222; border:1px solid #333; border-radius:1px; overflow:hidden;">
+      <div id="skillCooldownFill" style="width:0%; height:100%; background:#4a9eff; transition:width 0.05s linear;"></div>
+    </div>
+    <div id="skillStatus" style="margin-top:3px; font-size:9px; color:#888;">
+      Tool ready
+    </div>
   </div>
 
   <div id="deathBanner">object lost — re-detecting...</div>
@@ -405,6 +415,7 @@ let arenaW = 160, arenaH = 90, cellSize = 15;
 let players = [];
 let bullets = [];
 let gameBeams = [];
+let gameDashes = [];
 let palette = []; // [{color, name}] from server
 let ws;
 let keysDown = new Set();
@@ -497,6 +508,7 @@ function connect() {
       players = msg.players;
       bullets = msg.bullets || [];
       gameBeams = msg.beams || [];
+      gameDashes = msg.dashes || [];
       if (msg.palette) palette = msg.palette;
       resizeCanvas();
       determineClientState();
@@ -515,6 +527,7 @@ function connect() {
       players = msg.players;
       bullets = msg.bullets || [];
       gameBeams = msg.beams || [];
+      gameDashes = msg.dashes || [];
       if (msg.palette) palette = msg.palette;
       determineClientState();
       updateOverlay();
@@ -539,6 +552,7 @@ function connect() {
     players = [];
     bullets = [];
     gameBeams = [];
+    gameDashes = [];
     palette = [];
     lobbyBuilt = false;
     resetInputState();
@@ -933,6 +947,29 @@ function render() {
       ctx.restore();
     }
 
+    // ── Circle shield: dashed contour like a segmentation mask ──
+    if (p.shieldTicks > 0) {
+      ctx.save();
+      ctx.globalAlpha = 0.35 + 0.5 * (p.shieldTicks / p.shieldMax);
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([6, 4]);
+      ctx.beginPath();
+      ctx.arc(px + pw / 2, py + ph / 2, p.shieldRadius * cellSize, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    // ── Rectangle upgrade: small inner rectangle ──
+    if (p.upgradeTicks > 0) {
+      var inset = Math.min(pw, ph) * 0.28;
+      ctx.save();
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(px + inset, py + inset, pw - inset * 2, ph - inset * 2);
+      ctx.restore();
+    }
+
     // ── HP bar above box ──
     var labelH = 12;
     var hpBarW = pw;
@@ -1003,6 +1040,20 @@ function render() {
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText('LOST', dpx + dpw / 2, dpy + dph / 2);
+    ctx.restore();
+  }
+
+  // ── Draw square dash trails ──
+  for (var dsi = 0; dsi < gameDashes.length; dsi++) {
+    var dsh = gameDashes[dsi];
+    ctx.save();
+    ctx.globalAlpha = 0.8 * (dsh.life / dsh.maxLife);
+    ctx.strokeStyle = dsh.color;
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(dsh.x1 * cellSize, dsh.y1 * cellSize);
+    ctx.lineTo(dsh.x2 * cellSize, dsh.y2 * cellSize);
+    ctx.stroke();
     ctx.restore();
   }
 
@@ -1132,6 +1183,44 @@ function updateUI() {
 
   updateShotDots();
   updateChargeBar();
+  updateSkillBar();
+}
+
+var SKILL_INFO = {
+  circle:    { desc: 'E → shield 3s (+2 HP)', name: 'Shield' },
+  square:    { desc: 'E → dash (×3 dmg)',     name: 'Dash' },
+  rectangle: { desc: 'E → twin mode 5s',      name: 'Twin mode' }
+};
+
+function updateSkillBar() {
+  var me = getMe();
+  var key = document.getElementById('eKey');
+  var desc = document.getElementById('skillDesc');
+  var fill = document.getElementById('skillCooldownFill');
+  var status = document.getElementById('skillStatus');
+  if (!me || !key || !fill || !status) return;
+  var info = SKILL_INFO[me.shape] || { desc: 'Shape tool', name: 'Tool' };
+  desc.textContent = info.desc;
+
+  var active = me.shieldTicks > 0 ? { left: me.shieldTicks, max: me.shieldMax }
+             : me.upgradeTicks > 0 ? { left: me.upgradeTicks, max: me.upgradeMax }
+             : null;
+  var cooldown = Math.max(0, me.skillCooldown || 0);
+  if (active) {
+    fill.style.background = '#34c759';
+    fill.style.width = (active.left / active.max * 100) + '%';
+    status.textContent = info.name + ' active · ' + Math.ceil(active.left / 20) + 's';
+    status.style.color = '#34c759';
+    key.style.opacity = '1';
+  } else {
+    fill.style.background = '#4a9eff';
+    fill.style.width = (me.skillCooldownMax ? cooldown / me.skillCooldownMax * 100 : 0) + '%';
+    status.textContent = cooldown > 0
+      ? info.name + ' cooldown · ' + Math.ceil(cooldown / 20) + 's'
+      : info.name + ' ready';
+    status.style.color = cooldown > 0 ? '#888' : '#4a9eff';
+    key.style.opacity = cooldown > 0 ? '0.45' : '1';
+  }
 }
 
 function updateChargeBar() {
@@ -1206,6 +1295,14 @@ document.addEventListener('keydown', function(e) {
     if (!keysDown.has(e.key)) {
       keysDown.add(e.key);
       sendDir();
+    }
+  }
+
+  // E = shape skill (square may dash while charging)
+  if ((e.key === 'e' || e.key === 'E') && !e.repeat) {
+    e.preventDefault();
+    if (ws && ws.readyState === 1) {
+      ws.send(JSON.stringify({ type: 'skill', tx: mouseX, ty: mouseY }));
     }
   }
 

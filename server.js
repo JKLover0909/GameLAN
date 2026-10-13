@@ -37,6 +37,18 @@ const PALETTE = [
   { color: '#AF52DE', name: 'violet' },
 ];
 const MAX_PLAYERS = PALETTE.length;
+
+// ─── E skill constants (ticks at 20tps) ──────────────────────
+// Cooldowns for shield/upgrade start after the effect ends.
+const SKILL_COOLDOWN = { circle: 100, square: 40, rectangle: 200 };
+const SHIELD_TICKS = 60;          // circle: 3s shield
+const SHIELD_PADDING = 1.2;       // cells beyond the body radius
+const SHIELD_HEAL = 2;
+const DASH_DISTANCE_MULT = 3;     // square: 3× own size
+const DASH_DAMAGE = 3;
+const DASH_DISPLAY_TICKS = 6;
+const UPGRADE_TICKS = 100;        // rectangle: 5s upgraded state
+const TWIN_OFFSET = 0.7;          // cells between parallel bullets / beams
 const NAME_MAX_LEN = 20;
 
 const SHAPES = {
@@ -55,7 +67,8 @@ const CLASS_LABELS = [
 // ─── State ───────────────────────────────────────────────────
 const players = new Map();   // id → player
 const bullets = [];          // { x, y, vx, vy, ownerId, big, size, color }
-const beams = [];            // { x, y, dx, dy, ownerId, color, life, hitIds }
+const beams = [];            // { x, y, dx, dy, ownerId, color, life }
+const dashes = [];           // { x1, y1, x2, y2, color, life } — square dash trails
 let nextId = 1;
 let nextBulletId = 1;
 
@@ -102,9 +115,109 @@ function damagePlayer(target, amount, attackerId) {
   target.deaths++;
   target.charging = false;
   target.chargeTicks = 0;
+  // Effects end silently on death; their cooldown still applies
+  if (target.shieldTicks > 0 || target.upgradeTicks > 0) {
+    target.shieldTicks = 0;
+    target.upgradeTicks = 0;
+    target.skillCooldown = SKILL_COOLDOWN[target.shape];
+  }
   const attacker = players.get(attackerId);
   if (attacker) attacker.kills++;
   return true;
+}
+
+function bodyCenter(p) {
+  return { x: p.x + p.w / 2, y: p.y + p.h / 2 };
+}
+
+function shieldRadius(p) {
+  return Math.max(p.w, p.h) / 2 + SHIELD_PADDING;
+}
+
+// Shield ends (expired or broken by a laser): heal and start the cooldown
+function endShield(p) {
+  p.shieldTicks = 0;
+  p.hp = Math.min(MAX_HP, p.hp + SHIELD_HEAL);
+  p.skillCooldown = SKILL_COOLDOWN.circle;
+}
+
+// Distance from point (px,py) to segment (ax,ay)-(bx,by)
+function distToSegment(px, py, ax, ay, bx, by) {
+  const vx = bx - ax, vy = by - ay;
+  const len2 = vx * vx + vy * vy;
+  const t = len2 > 0 ? Math.max(0, Math.min(1, ((px - ax) * vx + (py - ay) * vy) / len2)) : 0;
+  return Math.hypot(px - (ax + vx * t), py - (ay + vy * t));
+}
+
+// Fire one laser from (cx,cy) along (ndx,ndy); pierces every player it touches
+function fireBeam(ownerId, owner, cx, cy, ndx, ndy) {
+  const hitIds = new Set();
+  const maxDist = Math.sqrt(ARENA_W * ARENA_W + ARENA_H * ARENA_H);
+  for (let t = 0; t < maxDist; t += 0.3) {
+    const rx = cx + ndx * t;
+    const ry = cy + ndy * t;
+    if (rx < -1 || rx > ARENA_W + 1 || ry < -1 || ry > ARENA_H + 1) break;
+    for (const [pid, target] of players) {
+      if (pid === ownerId || target.dead || target.joinTicks > 0 || hitIds.has(pid)) continue;
+      if (target.shieldTicks > 0) {
+        // The shield absorbs the laser and breaks
+        const c = bodyCenter(target);
+        if (Math.hypot(rx - c.x, ry - c.y) <= shieldRadius(target) + BEAM_WIDTH / 2) {
+          hitIds.add(pid);
+          endShield(target);
+        }
+        continue;
+      }
+      // Check if ray point is within BEAM_WIDTH/2 of target box
+      const closestX = Math.max(target.x, Math.min(rx, target.x + target.w));
+      const closestY = Math.max(target.y, Math.min(ry, target.y + target.h));
+      const distToBox = Math.sqrt((rx - closestX) ** 2 + (ry - closestY) ** 2);
+      if (distToBox <= BEAM_WIDTH / 2) {
+        hitIds.add(pid);
+        damagePlayer(target, BEAM_DAMAGE, ownerId);
+      }
+    }
+  }
+  beams.push({
+    x: cx, y: cy,
+    dx: ndx, dy: ndy,
+    ownerId,
+    color: owner.color,
+    life: BEAM_DISPLAY_TICKS,
+  });
+}
+
+function useSkill(id, p, tx, ty) {
+  if (p.skillCooldown > 0 || p.shieldTicks > 0 || p.upgradeTicks > 0) return;
+
+  if (p.shape === 'circle') {
+    p.shieldTicks = SHIELD_TICKS;
+  } else if (p.shape === 'rectangle') {
+    p.upgradeTicks = UPGRADE_TICKS;
+  } else if (p.shape === 'square') {
+    const start = bodyCenter(p);
+    const ddx = tx - start.x;
+    const ddy = ty - start.y;
+    const dist = Math.hypot(ddx, ddy);
+    if (dist < 0.1) return;
+    const len = Math.max(p.w, p.h) * DASH_DISTANCE_MULT;
+    p.x = Math.max(0, Math.min(ARENA_W - p.w, p.x + (ddx / dist) * len));
+    p.y = Math.max(0, Math.min(ARENA_H - p.h, p.y + (ddy / dist) * len));
+    const end = bodyCenter(p);
+    p.skillCooldown = SKILL_COOLDOWN.square;
+
+    let killed = false;
+    for (const [pid, target] of players) {
+      if (pid === id || target.dead || target.joinTicks > 0) continue;
+      const c = bodyCenter(target);
+      const reach = (Math.max(p.w, p.h) + Math.max(target.w, target.h)) / 2;
+      if (distToSegment(c.x, c.y, start.x, start.y, end.x, end.y) <= reach) {
+        if (damagePlayer(target, DASH_DAMAGE, id)) killed = true;
+      }
+    }
+    if (killed) p.skillCooldown = 0;   // a dash kill refreshes the dash
+    dashes.push({ ownerId: id, x1: start.x, y1: start.y, x2: end.x, y2: end.y, color: p.color, life: DASH_DISPLAY_TICKS });
+  }
 }
 
 function gameState() {
@@ -122,6 +235,11 @@ function gameState() {
       deaths: p.deaths,
       charging: p.charging,
       chargeProgress: p.charging ? Math.min(1, p.chargeTicks / CHARGE_TICKS) : 0,
+      skillCooldown: p.skillCooldown,
+      skillCooldownMax: SKILL_COOLDOWN[p.shape],
+      shieldTicks: p.shieldTicks, shieldMax: SHIELD_TICKS,
+      shieldRadius: shieldRadius(p),
+      upgradeTicks: p.upgradeTicks, upgradeMax: UPGRADE_TICKS,
       beamCooldown: p.beamCooldown,
       joining: p.joinTicks > 0,
       joinProgress: p.joinTicks > 0 ? 1 - p.joinTicks / JOIN_DELAY_TICKS : 1,
@@ -143,6 +261,7 @@ function gameState() {
     players: pList,
     bullets: bList,
     beams: beamList,
+    dashes: dashes.map(d => ({ ...d, maxLife: DASH_DISPLAY_TICKS })),
     palette: PALETTE,
     maxPlayers: MAX_PLAYERS,
     arena: { w: ARENA_W, h: ARENA_H, cell: CELL },
@@ -208,6 +327,9 @@ wss.on('connection', (ws) => {
       beamCooldown: 0,  // ticks until the laser can be charged again
       chargeDirX: 0,    // aim direction when charging
       chargeDirY: 0,
+      skillCooldown: 0, // ticks until E can be used again
+      shieldTicks: 0,   // circle: active shield time left
+      upgradeTicks: 0,  // rectangle: active upgrade time left
       kills: 0,
       deaths: 0,
       ws,
@@ -246,92 +368,69 @@ wss.on('connection', (ws) => {
       if (msg.type === 'shoot' && !p.dead) {
         if (p.shootCooldown > 0) return; // on cooldown
         if (p.charging) return; // can't normal-shoot while charging
-        p.shootCooldown = SHOOT_COOLDOWN;
-
-        // target in canvas pixels → convert to grid cells
-        const tx = msg.tx;
-        const ty = msg.ty;
 
         // bullet spawns from center of player box
-        const cx = p.x + p.w / 2;
-        const cy = p.y + p.h / 2;
-        const dx = tx - cx;
-        const dy = ty - cy;
+        const { x: cx, y: cy } = bodyCenter(p);
+        const dx = msg.tx - cx;
+        const dy = msg.ty - cy;
         const dist = Math.sqrt(dx * dx + dy * dy);
         if (dist < 0.1) return; // click on self
+        p.shootCooldown = SHOOT_COOLDOWN;
 
-        const vx = (dx / dist) * BULLET_SPEED;
-        const vy = (dy / dist) * BULLET_SPEED;
-
+        const ndx = dx / dist;
+        const ndy = dy / dist;
         p.shotCount++;
         const isBig = (p.shotCount % 3 === 0);
 
-        bullets.push({
-          id: nextBulletId++,
-          x: cx, y: cy,
-          vx, vy,
-          ownerId: id,
-          big: isBig,
-          size: isBig ? BIG_BULLET_SIZE : SMALL_BULLET_SIZE,
-          damage: isBig ? 3 : 1,
-          color: p.color,
-          life: 200,  // max ticks alive (~10s)
-        });
+        // Upgraded rectangle fires two parallel bullets
+        const offsets = p.upgradeTicks > 0 ? [-TWIN_OFFSET, TWIN_OFFSET] : [0];
+        for (const off of offsets) {
+          bullets.push({
+            id: nextBulletId++,
+            x: cx - ndy * off, y: cy + ndx * off,
+            vx: ndx * BULLET_SPEED, vy: ndy * BULLET_SPEED,
+            ownerId: id,
+            big: isBig,
+            size: isBig ? BIG_BULLET_SIZE : SMALL_BULLET_SIZE,
+            damage: isBig ? 3 : 1,
+            color: p.color,
+            life: 200,  // max ticks alive (~10s)
+          });
+        }
+      }
+
+      // ── E skill (shape-specific) ──
+      if (msg.type === 'skill' && !p.dead) {
+        useSkill(id, p, msg.tx, msg.ty);
       }
 
       // ── Charge beam (Space) ──
       if (msg.type === 'charge_start' && !p.dead && p.beamCooldown <= 0 && !p.charging) {
         p.charging = true;
         p.chargeTicks = 0;
-        p.chargeDirX = msg.tx || 0;
-        p.chargeDirY = msg.ty || 0;
+        p.chargeDirX = msg.tx;
+        p.chargeDirY = msg.ty;
       }
       if (msg.type === 'charge_aim' && p.charging) {
-        p.chargeDirX = msg.tx || 0;
-        p.chargeDirY = msg.ty || 0;
+        p.chargeDirX = msg.tx;
+        p.chargeDirY = msg.ty;
       }
       if (msg.type === 'charge_release' && !p.dead) {
         if (p.charging && p.chargeTicks >= CHARGE_TICKS) {
-          // Fire the beam!
-          const cx = p.x + p.w / 2;
-          const cy = p.y + p.h / 2;
-          const tx = msg.tx || p.chargeDirX;
-          const ty = msg.ty || p.chargeDirY;
+          const { x: cx, y: cy } = bodyCenter(p);
+          const tx = isNum(msg.tx) ? msg.tx : p.chargeDirX;
+          const ty = isNum(msg.ty) ? msg.ty : p.chargeDirY;
           const ddx = tx - cx;
           const ddy = ty - cy;
           const dist = Math.sqrt(ddx * ddx + ddy * ddy);
           if (dist > 0.1) {
             const ndx = ddx / dist;
             const ndy = ddy / dist;
-
-            // Raycast: check every player along the beam line
-            const hitIds = new Set();
-            const maxDist = Math.sqrt(ARENA_W * ARENA_W + ARENA_H * ARENA_H);
-            for (let t = 0; t < maxDist; t += 0.3) {
-              const rx = cx + ndx * t;
-              const ry = cy + ndy * t;
-              if (rx < -1 || rx > ARENA_W + 1 || ry < -1 || ry > ARENA_H + 1) break;
-              for (const [pid, target] of players) {
-                if (pid === id || target.dead || hitIds.has(pid)) continue;
-                // Check if ray point is within BEAM_WIDTH/2 of target box
-                const closestX = Math.max(target.x, Math.min(rx, target.x + target.w));
-                const closestY = Math.max(target.y, Math.min(ry, target.y + target.h));
-                const distToBox = Math.sqrt((rx - closestX) ** 2 + (ry - closestY) ** 2);
-                if (distToBox <= BEAM_WIDTH / 2) {
-                  hitIds.add(pid);
-                  damagePlayer(target, BEAM_DAMAGE, id);
-                }
-              }
+            // Upgraded rectangle fires two parallel lasers
+            const offsets = p.upgradeTicks > 0 ? [-TWIN_OFFSET, TWIN_OFFSET] : [0];
+            for (const off of offsets) {
+              fireBeam(id, p, cx - ndy * off, cy + ndx * off, ndx, ndy);
             }
-
-            beams.push({
-              x: cx, y: cy,
-              dx: ndx, dy: ndy,
-              ownerId: id,
-              color: p.color,
-              life: BEAM_DISPLAY_TICKS,
-              hitIds: [...hitIds],
-            });
             p.beamCooldown = BEAM_COOLDOWN_TICKS;
           }
         }
@@ -349,6 +448,9 @@ wss.on('connection', (ws) => {
     }
     for (let i = beams.length - 1; i >= 0; i--) {
       if (beams[i].ownerId === id) beams.splice(i, 1);
+    }
+    for (let i = dashes.length - 1; i >= 0; i--) {
+      if (dashes[i].ownerId === id) dashes.splice(i, 1);
     }
     broadcast(gameState());
   });
@@ -368,6 +470,17 @@ setInterval(() => {
     }
     if (p.shootCooldown > 0) p.shootCooldown--;
     if (p.beamCooldown > 0) p.beamCooldown--;
+    if (p.skillCooldown > 0 && p.shieldTicks <= 0 && p.upgradeTicks <= 0) p.skillCooldown--;
+
+    // Tick active E effects
+    if (p.shieldTicks > 0 && !p.dead) {
+      p.shieldTicks--;
+      if (p.shieldTicks === 0) endShield(p);
+    }
+    if (p.upgradeTicks > 0 && !p.dead) {
+      p.upgradeTicks--;
+      if (p.upgradeTicks === 0) p.skillCooldown = SKILL_COOLDOWN.rectangle;
+    }
 
     // Tick charge
     if (p.charging && !p.dead) {
@@ -415,7 +528,16 @@ setInterval(() => {
     // Check collision with players
     let hit = false;
     for (const [pid, p] of players) {
-      if (pid === b.ownerId || p.dead) continue;
+      if (pid === b.ownerId || p.dead || p.joinTicks > 0) continue;
+      // Shield blocks normal and big bullets
+      if (p.shieldTicks > 0) {
+        const c = bodyCenter(p);
+        if (Math.hypot(b.x - c.x, b.y - c.y) <= shieldRadius(p)) {
+          hit = true;
+          break;
+        }
+        continue;
+      }
       // AABB collision: bullet center vs player box
       if (b.x >= p.x && b.x <= p.x + p.w &&
           b.y >= p.y && b.y <= p.y + p.h) {
@@ -433,6 +555,10 @@ setInterval(() => {
   for (let i = beams.length - 1; i >= 0; i--) {
     beams[i].life--;
     if (beams[i].life <= 0) beams.splice(i, 1);
+  }
+  for (let i = dashes.length - 1; i >= 0; i--) {
+    dashes[i].life--;
+    if (dashes[i].life <= 0) dashes.splice(i, 1);
   }
 
   broadcast(gameState());
@@ -454,9 +580,9 @@ server.listen(PORT, '0.0.0.0', () => {
   console.log(`║  Local:  http://localhost:${PORT}                  ║`);
   console.log(`║  LAN:    http://${lanIP}:${PORT}`.padEnd(51) + '║');
   console.log('║                                                  ║');
-  console.log('║  Controls: Arrow keys = move                     ║');
-  console.log('║            Q = shoot toward mouse cursor         ║');
-  console.log('║            Every 3rd Q = BIG bullet (3 dmg)      ║');
+  console.log('║  Controls: WASD = move, left-click = shoot       ║');
+  console.log('║            Hold Space = laser, E = shape skill   ║');
+  console.log('║            Every 3rd shot = BIG bullet (3 dmg)   ║');
   console.log('╚══════════════════════════════════════════════════╝');
   console.log('');
 });
