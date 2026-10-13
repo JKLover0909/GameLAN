@@ -571,6 +571,8 @@ let gameBeams = [];
 let gameDashes = [];
 let gameBlasts = [];
 let gameCrescents = [];
+let gameItems = [];
+let gamePickups = [];
 let walls = []; // [{x, y, w, h}] map terrain from server
 let palette = []; // [{color, name}] from server
 let ws;
@@ -690,7 +692,7 @@ function connect() {
       currentMode = null;
       teams = null;
       players = [];
-      bullets = []; gameBeams = []; gameDashes = []; gameBlasts = []; gameCrescents = [];
+      bullets = []; gameBeams = []; gameDashes = []; gameBlasts = []; gameCrescents = []; gameItems = []; gamePickups = [];
       modeCounts = msg;
       determineClientState();
       updateOverlay();
@@ -719,6 +721,8 @@ function connect() {
       gameDashes = msg.dashes || [];
       gameBlasts = msg.blasts || [];
       gameCrescents = msg.crescents || [];
+      gameItems = msg.items || [];
+      gamePickups = msg.pickups || [];
       walls = msg.walls || [];
       if (msg.palette) palette = msg.palette;
       resizeCanvas();
@@ -742,6 +746,8 @@ function connect() {
       gameDashes = msg.dashes || [];
       gameBlasts = msg.blasts || [];
       gameCrescents = msg.crescents || [];
+      gameItems = msg.items || [];
+      gamePickups = msg.pickups || [];
       teamScore = msg.score || null;
       if (msg.walls) walls = msg.walls;
       if (msg.palette) palette = msg.palette;
@@ -1619,6 +1625,127 @@ function strokeSpawnShield(p, px, py, pw, ph) {
   ctx.restore();
 }
 
+// ─── Items: heal (green plus), speed (blue arrow), damage (red burst) ───
+var ITEM_COLORS = { heal: '#34C759', speed: '#00C7FF', damage: '#FF3B30' };
+var ITEM_LABELS = { heal: 'hp +2', speed: 'motion', damage: 'dmg x1.5' };
+var ITEM_POP_TICKS = 12; // rainbow pop-in after an item drops
+
+function itemIconPath(kind, cx, cy, s) {
+  ctx.beginPath();
+  if (kind === 'heal') {
+    var a = s * 0.18, b = s * 0.5;
+    ctx.moveTo(cx - a, cy - b); ctx.lineTo(cx + a, cy - b); ctx.lineTo(cx + a, cy - a);
+    ctx.lineTo(cx + b, cy - a); ctx.lineTo(cx + b, cy + a); ctx.lineTo(cx + a, cy + a);
+    ctx.lineTo(cx + a, cy + b); ctx.lineTo(cx - a, cy + b); ctx.lineTo(cx - a, cy + a);
+    ctx.lineTo(cx - b, cy + a); ctx.lineTo(cx - b, cy - a); ctx.lineTo(cx - a, cy - a);
+    ctx.closePath();
+  } else if (kind === 'speed') {
+    var h = s * 0.5;
+    ctx.moveTo(cx - h, cy - h * 0.3); ctx.lineTo(cx + h * 0.05, cy - h * 0.3);
+    ctx.lineTo(cx + h * 0.05, cy - h * 0.75); ctx.lineTo(cx + h, cy);
+    ctx.lineTo(cx + h * 0.05, cy + h * 0.75); ctx.lineTo(cx + h * 0.05, cy + h * 0.3);
+    ctx.lineTo(cx - h, cy + h * 0.3);
+    ctx.closePath();
+  } else {
+    // Eight-point burst
+    for (var i = 0; i < 16; i++) {
+      var ang = (i / 16) * Math.PI * 2 - Math.PI / 2;
+      var rr = i % 2 ? s * 0.22 : s * 0.52;
+      var x = cx + Math.cos(ang) * rr, y = cy + Math.sin(ang) * rr;
+      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    }
+    ctx.closePath();
+  }
+}
+
+function strokeItem(it) {
+  var sz = it.size * cellSize;
+  var x = it.x * cellSize, y = it.y * cellSize;
+  var cx = x + sz / 2, cy = y + sz / 2;
+  var color = ITEM_COLORS[it.kind];
+  var pop = it.age < ITEM_POP_TICKS ? it.age / ITEM_POP_TICKS : 1; // 0 → 1
+  ctx.save();
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
+
+  if (pop < 1) {
+    // Pops in: a burst of seven rainbow rays and a rainbow ring snapping out
+    var n = SPAWN_RING_COLORS.length;
+    var ease = 1 - (1 - pop) * (1 - pop);
+    for (var i = 0; i < n; i++) {
+      var ang = (i / n) * Math.PI * 2 + 0.3;
+      var r1 = sz * (0.4 + 1.1 * ease), r2 = r1 + sz * 0.6 * (1 - pop);
+      ctx.globalAlpha = 1 - pop;
+      ctx.strokeStyle = SPAWN_RING_COLORS[i];
+      ctx.shadowColor = SPAWN_RING_COLORS[i];
+      ctx.shadowBlur = 10;
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      ctx.moveTo(cx + Math.cos(ang) * r1, cy + Math.sin(ang) * r1);
+      ctx.lineTo(cx + Math.cos(ang) * r2, cy + Math.sin(ang) * r2);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(cx, cy, sz * (0.5 + 0.8 * ease), ang, ang + (Math.PI * 2) / n * 0.85);
+      ctx.stroke();
+    }
+    // The icon blinks through the seven colours before settling
+    color = SPAWN_RING_COLORS[it.age % n];
+  }
+
+  // Idle: gentle bob and breathing glow
+  var bob = Math.sin((frameCounter + it.id * 7) * 0.15) * 2;
+  var scale = pop < 1 ? 0.4 + 0.8 * pop - 0.2 * Math.max(0, pop - 0.75) * 4 : 1;
+  ctx.globalAlpha = 1;
+  ctx.strokeStyle = color;
+  ctx.shadowColor = color;
+  ctx.shadowBlur = 8 + 6 * (0.5 + 0.5 * Math.sin(frameCounter * 0.2 + it.id));
+  ctx.lineWidth = 2.5;
+  itemIconPath(it.kind, cx, cy + bob, sz * scale);
+  ctx.stroke();
+
+  // Annotation-style dashed box and label around it
+  ctx.shadowBlur = 0;
+  ctx.globalAlpha = 0.55;
+  ctx.lineWidth = 1;
+  ctx.setLineDash([3, 3]);
+  ctx.strokeRect(x - 3, y - 3 + bob, sz + 6, sz + 6);
+  ctx.setLineDash([]);
+  ctx.globalAlpha = 0.8;
+  ctx.fillStyle = color;
+  ctx.font = '8px Consolas, Monaco, monospace';
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'bottom';
+  ctx.fillText(ITEM_LABELS[it.kind], x - 3, y - 5 + bob);
+  ctx.restore();
+}
+
+// Pickup: the icon swells and fades while a ring pulses out
+function strokePickup(pk) {
+  var t = 1 - pk.life / pk.maxLife;
+  var color = ITEM_COLORS[pk.kind];
+  var cx = pk.x * cellSize, cy = pk.y * cellSize;
+  var base = 1.6 * cellSize;
+  ctx.save();
+  ctx.lineJoin = 'round';
+  ctx.strokeStyle = color;
+  ctx.shadowColor = color;
+  ctx.shadowBlur = 12;
+  ctx.globalAlpha = 1 - t;
+  ctx.lineWidth = 2;
+  itemIconPath(pk.kind, cx, cy - t * 18, base * (1 + t));
+  ctx.stroke();
+  ctx.lineWidth = 3 * (1 - t) + 0.5;
+  ctx.beginPath();
+  ctx.arc(cx, cy, base * (0.6 + 1.6 * t), 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.fillStyle = color;
+  ctx.font = 'bold 10px Consolas, Monaco, monospace';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'bottom';
+  ctx.fillText(ITEM_LABELS[pk.kind], cx, cy - base * 0.8 - t * 24);
+  ctx.restore();
+}
+
 // ─── Death shatter: the outline breaks into flying stroke fragments ───
 var SHARD_MS = 900;
 var shards = []; // { x, y, hx, hy, vx, vy, spin, color, born } in cells
@@ -1750,6 +1877,9 @@ function render() {
     ctx.textBaseline = 'bottom';
     ctx.fillText('ignore', wx, wy - 2);
   }
+
+  // ── Draw items ──
+  for (var iti = 0; iti < gameItems.length; iti++) strokeItem(gameItems[iti]);
 
   // ── Draw bullets ──
   for (var bi = 0; bi < bullets.length; bi++) {
@@ -1899,6 +2029,26 @@ function render() {
       ctx.fillText('occluded', px + 3, py + 13);
     }
 
+    // Item buffs: tagged like extra attributes of the detection
+    var tagY = py + (p.slowed ? 23 : 13);
+    if (p.speedTicks > 0) {
+      ctx.fillStyle = ITEM_COLORS.speed;
+      ctx.fillText('motion ' + Math.ceil(p.speedTicks / 20) + 's', px + 3, tagY);
+      tagY += 10;
+    }
+    if (p.damageTicks > 0) {
+      ctx.fillStyle = ITEM_COLORS.damage;
+      ctx.fillText('dmg x1.5 ' + Math.ceil(p.damageTicks / 20) + 's', px + 3, tagY);
+      ctx.save();
+      ctx.globalAlpha = 0.35 + 0.25 * Math.sin(frameCounter * 0.5);
+      ctx.strokeStyle = ITEM_COLORS.damage;
+      ctx.lineWidth = 1.5;
+      ctx.shadowColor = ITEM_COLORS.damage;
+      ctx.shadowBlur = 8;
+      strokeShape(ctx, px - 4, py - 4, pw + 8, ph + 8, shape);
+      ctx.restore();
+    }
+
     // User name — below box, centered, separate from fake label
     if (p.name) {
       ctx.fillStyle = color;
@@ -1947,6 +2097,9 @@ function render() {
 
   // ── Draw shield blasts ──
   for (var bli = 0; bli < gameBlasts.length; bli++) strokeBlast(gameBlasts[bli]);
+
+  // ── Draw item pickups ──
+  for (var pki = 0; pki < gamePickups.length; pki++) strokePickup(gamePickups[pki]);
 
   // ── Draw energy beams ──
   for (var bei = 0; bei < gameBeams.length; bei++) {

@@ -74,6 +74,19 @@ const CRESCENT_SUBSTEPS = 2;      // so it cannot skip over a thin body
 const CRESCENT_LIFE = 200;        // max ticks alive
 const SLOW_TICKS = 40;            // 2s slow on hit
 const SLOW_SPEED_MULT = 0.7;      // slowed targets move 30% slower
+// ─── Items: one drops at a random spot every 30s ─────────────
+const ITEM_INTERVAL_TICKS = 600;  // 30s at 20tps
+const ITEM_MAX = 3;               // uncollected items on the field at once
+const ITEM_SIZE = 1.6;            // cells, pickup box
+const ITEM_KINDS = ['heal', 'speed', 'damage'];
+const ITEM_HEAL = 2;
+const SPEED_BUFF_TICKS = 120;     // 6s
+const SPEED_BUFF_MULT = 1.3;      // +30% move speed
+const DAMAGE_BUFF_TICKS = 120;    // 6s
+const DAMAGE_BUFF_MULT = 1.5;     // +50% damage dealt (rounded up)
+const PICKUP_DISPLAY_TICKS = 16;
+let nextItemId = 1;
+
 const STREAK_TEXT = ['+1 Object', 'Double Objects', 'Triple Objects', 'Quad Objects', 'Training 100%'];
 const NAME_MAX_LEN = 20;
 
@@ -132,6 +145,9 @@ function makeRoom(mode) {
     dashes: [],            // { x1, y1, x2, y2, color, life } — square dash trails
     blasts: [],            // { x, y, r0, r, color, life } — shield explosions
     crescents: [],         // { x, y, dx, dy, ownerId, team, color, life } — triangle E
+    items: [],             // { id, kind, x, y, age } — pickups on the field
+    pickups: [],           // { kind, x, y, color, life } — pickup flashes
+    itemTimer: ITEM_INTERVAL_TICKS,
     score: { warm: 0, cool: 0 }, // team mode: kills per side this match
   };
 }
@@ -217,6 +233,8 @@ function cleanName(raw) {
 // Apply damage and handle death + kill credit. Returns true if the target died.
 function damagePlayer(room, target, amount, attackerId) {
   if (target.dead || target.joinTicks > 0 || target.spawnTicks > 0) return false;
+  const source = room.players.get(attackerId);
+  if (source && source.damageTicks > 0) amount = Math.ceil(amount * DAMAGE_BUFF_MULT);
   target.hp -= amount;
   if (target.hp > 0) return false;
   target.hp = 0;
@@ -227,6 +245,8 @@ function damagePlayer(room, target, amount, attackerId) {
   target.chargeTicks = 0;
   target.streak = 0;
   target.slowTicks = 0;
+  target.speedTicks = 0;
+  target.damageTicks = 0;
   // Effects end silently on death; their cooldown still applies
   if (target.shieldTicks > 0 || target.upgradeTicks > 0) {
     target.shieldTicks = 0;
@@ -429,6 +449,8 @@ function gameState(room) {
       shieldRadius: shieldRadius(p),
       upgradeTicks: p.upgradeTicks, upgradeMax: UPGRADE_TICKS,
       slowed: p.slowTicks > 0,
+      speedTicks: p.speedTicks, speedMax: SPEED_BUFF_TICKS,
+      damageTicks: p.damageTicks, damageMax: DAMAGE_BUFF_TICKS,
       streak: p.streak,
       beamCooldown: p.beamCooldown,
       joining: p.joinTicks > 0,
@@ -459,6 +481,8 @@ function gameState(room) {
       x: c.x, y: c.y, dx: c.dx, dy: c.dy, color: c.color, ownerId: c.ownerId,
       r: CRESCENT.r, back: CRESCENT.back,
     })),
+    items: room.items.map(it => ({ id: it.id, kind: it.kind, x: it.x, y: it.y, size: ITEM_SIZE, age: it.age })),
+    pickups: room.pickups.map(pk => ({ ...pk, maxLife: PICKUP_DISPLAY_TICKS })),
     mode: room.mode,
     palette: PALETTE,
     maxPlayers: room.mode === 'team' ? TEAMS.length * TEAM_MAX : MAX_PLAYERS,
@@ -552,7 +576,11 @@ wss.on('connection', (ws) => {
     }
     room = null;
     // Everyone left: the next group starts a fresh match
-    if (r.players.size === 0) r.score = { warm: 0, cool: 0 };
+    if (r.players.size === 0) {
+      r.score = { warm: 0, cool: 0 };
+      r.items = [];
+      r.itemTimer = ITEM_INTERVAL_TICKS;
+    }
     broadcast(r, gameState(r));
   }
 
@@ -595,6 +623,8 @@ wss.on('connection', (ws) => {
       shieldTicks: 0,   // circle: active shield time left
       upgradeTicks: 0,  // rectangle: active upgrade time left
       slowTicks: 0,     // hit by a crescent: moves slower
+      speedTicks: 0,    // speed item time left
+      damageTicks: 0,   // damage item time left
       streak: 0,        // kills since last death
       kills: 0,
       deaths: 0,
@@ -738,6 +768,40 @@ const heartbeat = setInterval(() => {
 }, HEARTBEAT_MS);
 wss.on('close', () => clearInterval(heartbeat));
 
+// Drop a random item every ITEM_INTERVAL_TICKS while anyone is playing;
+// a living player touching one picks it up
+function tickItems(room) {
+  if (room.players.size > 0 && --room.itemTimer <= 0) {
+    room.itemTimer = ITEM_INTERVAL_TICKS;
+    if (room.items.length < ITEM_MAX) {
+      let pos;
+      do {
+        pos = { x: 3 + Math.random() * (ARENA_W - 6 - ITEM_SIZE), y: 3 + Math.random() * (ARENA_H - 6 - ITEM_SIZE) };
+      } while (hitsWall(pos.x - 0.5, pos.y - 0.5, ITEM_SIZE + 1, ITEM_SIZE + 1));
+      const kind = ITEM_KINDS[Math.floor(Math.random() * ITEM_KINDS.length)];
+      room.items.push({ id: nextItemId++, kind, x: pos.x, y: pos.y, age: 0 });
+    }
+  }
+  for (let i = room.items.length - 1; i >= 0; i--) {
+    const it = room.items[i];
+    it.age++;
+    for (const [, p] of room.players) {
+      if (p.dead || p.joinTicks > 0) continue;
+      if (p.x < it.x + ITEM_SIZE && p.x + p.w > it.x && p.y < it.y + ITEM_SIZE && p.y + p.h > it.y) {
+        if (it.kind === 'heal') p.hp = Math.min(MAX_HP, p.hp + ITEM_HEAL);
+        else if (it.kind === 'speed') p.speedTicks = SPEED_BUFF_TICKS;
+        else p.damageTicks = DAMAGE_BUFF_TICKS;
+        room.items.splice(i, 1);
+        room.pickups.push({ kind: it.kind, x: it.x + ITEM_SIZE / 2, y: it.y + ITEM_SIZE / 2, color: p.color, life: PICKUP_DISPLAY_TICKS });
+        break;
+      }
+    }
+  }
+  for (let i = room.pickups.length - 1; i >= 0; i--) {
+    if (--room.pickups[i].life <= 0) room.pickups.splice(i, 1);
+  }
+}
+
 // Team match end: announce the winner, kick everyone and start a fresh session
 function endMatch(room) {
   const { warm, cool } = room.score;
@@ -776,6 +840,8 @@ function tickRoom(room) {
     if (p.beamCooldown > 0) p.beamCooldown--;
     if (p.skillCooldown > 0 && p.shieldTicks <= 0 && p.upgradeTicks <= 0) p.skillCooldown--;
     if (p.slowTicks > 0) p.slowTicks--;
+    if (p.speedTicks > 0) p.speedTicks--;
+    if (p.damageTicks > 0) p.damageTicks--;
 
     // Tick active E effects
     if (p.shieldTicks > 0 && !p.dead) {
@@ -814,6 +880,7 @@ function tickRoom(room) {
       if (p.shieldTicks > 0) speedMult *= SHIELD_SPEED_MULT;
       if (p.upgradeTicks > 0) speedMult *= UPGRADE_SPEED_MULT;
       if (p.slowTicks > 0) speedMult *= SLOW_SPEED_MULT;
+      if (p.speedTicks > 0) speedMult *= SPEED_BUFF_MULT;
       const nx = p.x + p.dx * SPEED * speedMult;
       const ny = p.y + p.dy * SPEED * speedMult;
       if (nx >= 0 && nx + p.w <= ARENA_W && !hitsWall(nx, p.y, p.w, p.h)) p.x = nx;
@@ -882,6 +949,7 @@ function tickRoom(room) {
     room.blasts[i].life--;
     if (room.blasts[i].life <= 0) room.blasts.splice(i, 1);
   }
+  tickItems(room);
 
   if (room.mode === 'team' && Math.max(room.score.warm, room.score.cool) >= TEAM_KILL_TARGET) {
     return endMatch(room);
