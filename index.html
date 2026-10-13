@@ -55,6 +55,7 @@
     background: transparent; flex-shrink: 0;
   }
   .class-dot.circle { border-radius: 50%; }
+  .class-dot.triangle { border: none; width: 12px; height: 12px; }
   .class-label { color: #777; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .class-label.me { color: #fff; }
   .class-label.dead { color: #444; text-decoration: line-through; }
@@ -356,6 +357,10 @@
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="6" width="20" height="12"/></svg>
             rectangle
           </button>
+          <button class="shape-btn" data-shape="triangle" type="button">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12,3 21,20 3,20"/></svg>
+            triangle
+          </button>
         </div>
         <div id="shapeInfo"></div>
       </div>
@@ -482,6 +487,7 @@ let bullets = [];
 let gameBeams = [];
 let gameDashes = [];
 let gameBlasts = [];
+let gameCrescents = [];
 let walls = []; // [{x, y, w, h}] map terrain from server
 let palette = []; // [{color, name}] from server
 let ws;
@@ -599,6 +605,7 @@ function connect() {
       gameBeams = msg.beams || [];
       gameDashes = msg.dashes || [];
       gameBlasts = msg.blasts || [];
+      gameCrescents = msg.crescents || [];
       walls = msg.walls || [];
       if (msg.palette) palette = msg.palette;
       resizeCanvas();
@@ -621,6 +628,7 @@ function connect() {
       gameBeams = msg.beams || [];
       gameDashes = msg.dashes || [];
       gameBlasts = msg.blasts || [];
+      gameCrescents = msg.crescents || [];
       if (msg.walls) walls = msg.walls;
       if (msg.palette) palette = msg.palette;
       determineClientState();
@@ -652,6 +660,7 @@ function connect() {
     bullets = [];
     gameBeams = [];
     gameDashes = [];
+    gameCrescents = [];
     palette = [];
     lobbyBuilt = false;
     resetInputState();
@@ -869,6 +878,12 @@ var SHAPE_NOTES = {
     lines: ['Trong 5 giây: đạn thường, đạn to và laser đều bắn 2 đường song song.',
             'Hiện một hình chữ nhật nhỏ bên trong.'],
     cd: 'Hồi chiêu 10 giây'
+  },
+  triangle: {
+    title: 'E · Lưỡi liềm',
+    lines: ['Phóng lưỡi liềm to gấp đôi thân, bay nhanh hơn đạn 30%, gây 3 sát thương.',
+            'Trúng đích làm chậm 30% trong 2 giây. Bị tường và lá chắn chặn.'],
+    cd: 'Hồi chiêu 4 giây'
   }
 };
 var SHAPE_NOTE_COMMON = 'Mọi hình: click để bắn (phát thứ 3 là đạn to), giữ Space để bắn laser.';
@@ -994,6 +1009,8 @@ function applyShapeClip(ctx, px, py, pw, ph, shape) {
     var rx = pw / 2;
     var ry = ph / 2;
     ctx.ellipse(px + rx, py + ry, rx, ry, 0, 0, Math.PI * 2);
+  } else if (shape === 'triangle') {
+    trianglePath(ctx, px, py, pw, ph);
   } else {
     // square or rectangle — just rect
     ctx.rect(px, py, pw, ph);
@@ -1009,9 +1026,44 @@ function strokeShape(ctx, px, py, pw, ph, shape) {
     ctx.beginPath();
     ctx.ellipse(px + rx, py + ry, rx, ry, 0, 0, Math.PI * 2);
     ctx.stroke();
+  } else if (shape === 'triangle') {
+    ctx.beginPath();
+    trianglePath(ctx, px, py, pw, ph);
+    ctx.closePath();
+    ctx.stroke();
   } else {
     ctx.strokeRect(px, py, pw, ph);
   }
+}
+
+// Upward-pointing triangle filling the w×h box
+function trianglePoints(x, y, w, h) {
+  return [[x + w / 2, y], [x + w, y + h], [x, y + h]];
+}
+function trianglePath(ctx, px, py, pw, ph) {
+  var t = trianglePoints(px, py, pw, ph);
+  ctx.moveTo(t[0][0], t[0][1]);
+  ctx.lineTo(t[1][0], t[1][1]);
+  ctx.lineTo(t[2][0], t[2][1]);
+}
+
+// Crescent outline (stroke only): outer arc in front, inner arc behind
+function strokeCrescent(c) {
+  var r = c.r * cellSize, b = c.back * cellSize;
+  var hy = Math.sqrt(Math.max(0, r * r - b * b / 4));
+  var outerA = Math.atan2(hy, -b / 2);  // horn angle on the outer circle
+  var innerA = Math.atan2(hy, b / 2);   // horn angle on the inner circle
+  ctx.save();
+  ctx.translate(c.x * cellSize, c.y * cellSize);
+  ctx.rotate(Math.atan2(c.dy, c.dx));
+  ctx.strokeStyle = c.color;
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.arc(0, 0, r, -outerA, outerA, false);
+  ctx.arc(-b, 0, r, innerA, -innerA, true);
+  ctx.closePath();
+  ctx.stroke();
+  ctx.restore();
 }
 
 // ─── Death shatter: the outline breaks into flying stroke fragments ───
@@ -1035,6 +1087,13 @@ function spawnDeathShards(prevList, nextList) {
       for (var a = 0; a < 10; a++) {
         var ang = (a / 10) * Math.PI * 2;
         pts.push([cx + Math.cos(ang) * w / 2, cy + Math.sin(ang) * h / 2]);
+      }
+    } else if (before.shape === 'triangle') {
+      // Each edge split in two so the triangle breaks into 6 pieces
+      var tri = trianglePoints(before.x, before.y, w, h);
+      for (var t = 0; t < 3; t++) {
+        var t1 = tri[t], t2 = tri[(t + 1) % 3];
+        pts.push(t1, [(t1[0] + t2[0]) / 2, (t1[1] + t2[1]) / 2]);
       }
     } else {
       // Each edge split in two so the box breaks into 8 pieces
@@ -1177,7 +1236,7 @@ function render() {
     strokeShape(ctx, px, py, pw, ph, shape);
 
     // Corner markers (only for rect shapes)
-    if (shape !== 'circle') {
+    if (shape === 'square' || shape === 'rectangle') {
       drawCornerMarkers(ctx, px, py, pw, ph, color);
     }
 
@@ -1276,6 +1335,12 @@ function render() {
     ctx.textBaseline = 'top';
     ctx.fillText(p.label + ' ' + p.conf, px + 3, py + 3);
 
+    // Slowed by a crescent: tagged like a partially occluded object
+    if (p.slowed) {
+      ctx.fillStyle = '#777';
+      ctx.fillText('occluded', px + 3, py + 13);
+    }
+
     // User name — below box, centered, separate from fake label
     if (p.name) {
       ctx.fillStyle = color;
@@ -1329,6 +1394,9 @@ function render() {
     ctx.stroke();
     ctx.restore();
   }
+
+  // ── Draw triangle crescents ──
+  for (var cri = 0; cri < gameCrescents.length; cri++) strokeCrescent(gameCrescents[cri]);
 
   // ── Draw shield blasts: expanding dashed ring, stroke only ──
   for (var bli = 0; bli < gameBlasts.length; bli++) {
@@ -1451,11 +1519,13 @@ function updateUI() {
     var hpPct = Math.max(0, (p.hp / p.maxHp) * 100);
     var hpColor = hpPct > 60 ? '#00ff00' : hpPct > 30 ? '#ffaa00' : '#ff3333';
     var isMe = p.id === myId;
-    var dotClass = 'class-dot' + (p.shape === 'circle' ? ' circle' : '');
+    var dotClass = 'class-dot' + (p.shape === 'circle' || p.shape === 'triangle' ? ' ' + p.shape : '');
     var safeName = p.name ? escHtml(p.name) : '';
     var safeLabel = escHtml(p.label);
     return '<div class="class-row">' +
-      '<div class="' + dotClass + '" style="border-color:' + escAttr(p.color) + (p.dead ? ';opacity:0.3' : '') + '"></div>' +
+      (p.shape === 'triangle'
+        ? '<svg class="' + dotClass + '" viewBox="0 0 12 12" style="' + (p.dead ? 'opacity:0.3' : '') + '"><polygon points="6,1 11,11 1,11" fill="none" stroke="' + escAttr(p.color) + '" stroke-width="2"/></svg>'
+        : '<div class="' + dotClass + '" style="border-color:' + escAttr(p.color) + (p.dead ? ';opacity:0.3' : '') + '"></div>') +
       '<span class="class-label ' + (isMe ? 'me' : '') + ' ' + (p.dead ? 'dead' : '') + '">' +
         safeLabel + (isMe ? ' ●' : '') + '</span>' +
       (safeName ? '<span class="class-name" title="' + escAttr(p.name) + '">' + safeName + '</span>' : '') +
@@ -1477,7 +1547,8 @@ function updateUI() {
 var SKILL_INFO = {
   circle:    { desc: 'E → shield 3s (+15% speed, blast)', name: 'Shield' },
   square:    { desc: 'E → dash (×3 dmg)',     name: 'Dash' },
-  rectangle: { desc: 'E → twin mode 5s',      name: 'Twin mode' }
+  rectangle: { desc: 'E → twin mode 5s',      name: 'Twin mode' },
+  triangle:  { desc: 'E → crescent (3 dmg, slow)', name: 'Crescent' }
 };
 
 function updateSkillBar() {

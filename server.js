@@ -40,7 +40,7 @@ const MAX_PLAYERS = PALETTE.length;
 
 // ─── E skill constants (ticks at 20tps) ──────────────────────
 // Cooldowns for shield/upgrade start after the effect ends.
-const SKILL_COOLDOWN = { circle: 100, square: 40, rectangle: 200 };
+const SKILL_COOLDOWN = { circle: 100, square: 40, rectangle: 200, triangle: 80 };
 const SHIELD_TICKS = 60;          // circle: 3s shield
 const SHIELD_SPEED_MULT = 1.15;   // circle moves 15% faster while shielded
 const SHIELD_PADDING = 1.2;       // cells beyond the body radius
@@ -54,6 +54,13 @@ const DASH_DAMAGE = 3;
 const DASH_DISPLAY_TICKS = 6;
 const UPGRADE_TICKS = 100;        // rectangle: 5s upgraded state
 const TWIN_OFFSET = 0.7;          // cells between parallel bullets / beams
+const CRESCENT_SPEED = BULLET_SPEED * 1.3; // triangle: 30% faster than a bullet
+const CRESCENT_DAMAGE = 3;
+const CRESCENT_AREA_MULT = 2;     // crescent area = 2× the triangle's area
+const CRESCENT_SUBSTEPS = 2;      // so it cannot skip over a thin wall or body
+const CRESCENT_LIFE = 200;        // max ticks alive
+const SLOW_TICKS = 40;            // 2s slow on hit
+const SLOW_SPEED_MULT = 0.7;      // slowed targets move 30% slower
 const STREAK_TEXT = ['+1 Object', 'Double Objects', 'Triple Objects', 'Quad Objects', 'Training 100%'];
 const NAME_MAX_LEN = 20;
 
@@ -68,7 +75,30 @@ const SHAPES = {
   circle:    { w: 3, h: 3 },
   square:    { w: 3, h: 3 },
   rectangle: { w: 4, h: 2 },
+  triangle:  { w: 3, h: 3 },
 };
+
+// Crescent ("moon") shape in its local frame, x = flight direction: inside the
+// outer circle (radius 1 at the origin) and outside the inner circle (radius 1
+// centred CRESCENT_BACK behind). Scaled so its area hits the target.
+const CRESCENT_BACK = 0.6;
+const CRESCENT = (() => {
+  const inLune = (x, y, k) => x * x + y * y <= k * k && (x + CRESCENT_BACK * k) ** 2 + y * y > k * k;
+  // Lune area of the unit shape: circle minus the overlap of two unit circles
+  const h = CRESCENT_BACK / 2;
+  const unitArea = Math.PI - (2 * Math.acos(h) - 2 * h * Math.sqrt(1 - h * h));
+  const area = SHAPES.triangle.w * SHAPES.triangle.h / 2 * CRESCENT_AREA_MULT;
+  const scale = Math.sqrt(area / unitArea);
+  // Grid of sample points covering the shape, used for collisions
+  const step = 0.25;
+  const points = [];
+  for (let x = -scale; x <= scale; x += step) {
+    for (let y = -scale; y <= scale; y += step) {
+      if (inLune(x, y, scale)) points.push([x, y]);
+    }
+  }
+  return { r: scale, back: CRESCENT_BACK * scale, points };
+})();
 
 const CLASS_LABELS = [
   'person', 'car', 'truck', 'bicycle', 'motorcycle',
@@ -83,6 +113,7 @@ const bullets = [];          // { x, y, vx, vy, ownerId, big, size, color }
 const beams = [];            // { x, y, dx, dy, ownerId, color, life }
 const dashes = [];           // { x1, y1, x2, y2, color, life } — square dash trails
 const blasts = [];           // { x, y, r0, r, color, life } — shield explosions
+const crescents = [];        // { x, y, dx, dy, ownerId, color, life } — triangle E
 let nextId = 1;
 let nextBulletId = 1;
 
@@ -157,6 +188,7 @@ function damagePlayer(target, amount, attackerId) {
   target.charging = false;
   target.chargeTicks = 0;
   target.streak = 0;
+  target.slowTicks = 0;
   // Effects end silently on death; their cooldown still applies
   if (target.shieldTicks > 0 || target.upgradeTicks > 0) {
     target.shieldTicks = 0;
@@ -256,6 +288,14 @@ function useSkill(id, p, tx, ty) {
     p.shieldTicks = SHIELD_TICKS;
   } else if (p.shape === 'rectangle') {
     p.upgradeTicks = UPGRADE_TICKS;
+  } else if (p.shape === 'triangle') {
+    const c = bodyCenter(p);
+    const ddx = tx - c.x;
+    const ddy = ty - c.y;
+    const dist = Math.hypot(ddx, ddy);
+    if (dist < 0.1) return;
+    p.skillCooldown = SKILL_COOLDOWN.triangle;
+    crescents.push({ x: c.x, y: c.y, dx: ddx / dist, dy: ddy / dist, ownerId: id, color: p.color, life: CRESCENT_LIFE });
   } else if (p.shape === 'square') {
     const start = bodyCenter(p);
     const ddx = tx - start.x;
@@ -292,6 +332,38 @@ function useSkill(id, p, tx, ty) {
   }
 }
 
+// Crescent sample points in world space at its current position
+function crescentPoints(c) {
+  return CRESCENT.points.map(([lx, ly]) => [c.x + c.dx * lx - c.dy * ly, c.y + c.dy * lx + c.dx * ly]);
+}
+
+// Advance one crescent by a tick: 'fly', or why it is spent ('wall', 'hit', 'gone')
+function stepCrescent(c) {
+  for (let s = 0; s < CRESCENT_SUBSTEPS; s++) {
+    c.x += c.dx * CRESCENT_SPEED / CRESCENT_SUBSTEPS;
+    c.y += c.dy * CRESCENT_SPEED / CRESCENT_SUBSTEPS;
+    const m = CRESCENT.r + 1;
+    if (c.x < -m || c.x > ARENA_W + m || c.y < -m || c.y > ARENA_H + m) return 'gone';
+    const pts = crescentPoints(c);
+    if (pts.some(([x, y]) => hitsWall(x, y, 0, 0))) return 'wall';
+    for (const [pid, target] of players) {
+      if (pid === c.ownerId || target.dead || target.joinTicks > 0) continue;
+      if (target.shieldTicks > 0) {
+        // The shield blocks the crescent and holds
+        const tc = bodyCenter(target);
+        const sr = shieldRadius(target);
+        if (pts.some(([x, y]) => Math.hypot(x - tc.x, y - tc.y) <= sr)) return 'hit';
+        continue;
+      }
+      if (pts.some(([x, y]) => x >= target.x && x <= target.x + target.w && y >= target.y && y <= target.y + target.h)) {
+        if (!damagePlayer(target, CRESCENT_DAMAGE, c.ownerId)) target.slowTicks = SLOW_TICKS;
+        return 'hit';
+      }
+    }
+  }
+  return 'fly';
+}
+
 function gameState() {
   const pList = [];
   for (const [id, p] of players) {
@@ -312,6 +384,7 @@ function gameState() {
       shieldTicks: p.shieldTicks, shieldMax: SHIELD_TICKS,
       shieldRadius: shieldRadius(p),
       upgradeTicks: p.upgradeTicks, upgradeMax: UPGRADE_TICKS,
+      slowed: p.slowTicks > 0,
       streak: p.streak,
       beamCooldown: p.beamCooldown,
       joining: p.joinTicks > 0,
@@ -336,6 +409,10 @@ function gameState() {
     beams: beamList,
     dashes: dashes.map(d => ({ ...d, maxLife: DASH_DISPLAY_TICKS })),
     blasts: blasts.map(b => ({ ...b, maxLife: BLAST_DISPLAY_TICKS })),
+    crescents: crescents.map(c => ({
+      x: c.x, y: c.y, dx: c.dx, dy: c.dy, color: c.color, ownerId: c.ownerId,
+      r: CRESCENT.r, back: CRESCENT.back,
+    })),
     palette: PALETTE,
     maxPlayers: MAX_PLAYERS,
     arena: { w: ARENA_W, h: ARENA_H, cell: CELL },
@@ -408,6 +485,7 @@ wss.on('connection', (ws) => {
       skillCooldown: 0, // ticks until E can be used again
       shieldTicks: 0,   // circle: active shield time left
       upgradeTicks: 0,  // rectangle: active upgrade time left
+      slowTicks: 0,     // hit by a crescent: moves slower
       streak: 0,        // kills since last death
       kills: 0,
       deaths: 0,
@@ -534,6 +612,9 @@ wss.on('connection', (ws) => {
     for (let i = blasts.length - 1; i >= 0; i--) {
       if (blasts[i].ownerId === id) blasts.splice(i, 1);
     }
+    for (let i = crescents.length - 1; i >= 0; i--) {
+      if (crescents[i].ownerId === id) crescents.splice(i, 1);
+    }
     broadcast(gameState());
   });
 });
@@ -553,6 +634,7 @@ setInterval(() => {
     if (p.shootCooldown > 0) p.shootCooldown--;
     if (p.beamCooldown > 0) p.beamCooldown--;
     if (p.skillCooldown > 0 && p.shieldTicks <= 0 && p.upgradeTicks <= 0) p.skillCooldown--;
+    if (p.slowTicks > 0) p.slowTicks--;
 
     // Tick active E effects
     if (p.shieldTicks > 0 && !p.dead) {
@@ -588,6 +670,7 @@ setInterval(() => {
     if (p.dx !== 0 || p.dy !== 0) {
       let speedMult = p.charging ? CHARGE_SPEED_MULT : 1;
       if (p.shieldTicks > 0) speedMult *= SHIELD_SPEED_MULT;
+      if (p.slowTicks > 0) speedMult *= SLOW_SPEED_MULT;
       const nx = p.x + p.dx * SPEED * speedMult;
       const ny = p.y + p.dy * SPEED * speedMult;
       if (nx >= 0 && nx + p.w <= ARENA_W && !hitsWall(nx, p.y, p.w, p.h)) p.x = nx;
@@ -634,6 +717,19 @@ setInterval(() => {
     if (hit) {
       bullets.splice(i, 1);
     }
+  }
+
+  // Move crescents: blocked by walls and shields, stop at the first body hit
+  for (let i = crescents.length - 1; i >= 0; i--) {
+    const c = crescents[i];
+    const fresh = c.life === CRESCENT_LIFE;
+    const result = stepCrescent(c);
+    // Fired point-blank into a wall: the skill is not wasted
+    if (result === 'wall' && fresh) {
+      const owner = players.get(c.ownerId);
+      if (owner) owner.skillCooldown = 0;
+    }
+    if (result !== 'fly' || --c.life <= 0) crescents.splice(i, 1);
   }
 
   // Tick beam display lifetime
