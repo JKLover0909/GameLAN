@@ -313,6 +313,14 @@
     max-width: 90vw;
   }
   #modePanel h3, #lobbyPanel h3 { display: flex; align-items: baseline; }
+  /* Last match result, shown above the session list */
+  #matchResult {
+    display: none;
+    margin-bottom: 14px; padding: 8px 10px;
+    border: 1px solid #333; border-left: 2px solid #4a9eff;
+    font-size: 10px; color: #777; line-height: 15px;
+  }
+  #matchResult .result-head { color: #aaa; font-size: 11px; }
   .mode-btn {
     display: block; width: 100%;
     margin-bottom: 8px; padding: 10px 12px;
@@ -399,6 +407,7 @@
     <div id="overlayCountdown"></div>
     <div id="modePanel" style="display:none;">
       <h3>Select Annotation Session</h3>
+      <div id="matchResult"></div>
       <button class="mode-btn" data-mode="free" type="button">
         free_label <span class="mode-count" id="modeCountFree"></span>
         <span class="mode-sub">Arena label tự do · mọi người đều là đối thủ</span>
@@ -577,6 +586,8 @@ let currentMode = null;  // 'free' | 'team' once a session mode is picked
 let teams = null;        // team mode: [{ id, name, colors }] from server
 let teamMax = 3;
 let modeCounts = null;   // player counts for the mode picker
+let teamScore = null;    // team mode: { warm, cool } kills this match
+let scoreTarget = 20;
 let selectedTeam = null;
 
 // Lobby selections
@@ -693,6 +704,9 @@ function connect() {
       currentMode = msg.mode;
       teams = msg.teams || null;
       if (msg.teamMax) teamMax = msg.teamMax;
+      teamScore = msg.score || null;
+      if (msg.scoreTarget) scoreTarget = msg.scoreTarget;
+      hideMatchResult();
       selectedTeam = null;
       selectedColor = null;
       lobbyPaletteKey = '';
@@ -728,12 +742,18 @@ function connect() {
       gameDashes = msg.dashes || [];
       gameBlasts = msg.blasts || [];
       gameCrescents = msg.crescents || [];
+      teamScore = msg.score || null;
       if (msg.walls) walls = msg.walls;
       if (msg.palette) palette = msg.palette;
       determineClientState();
       updateOverlay();
       updateUI();
       render();
+      return;
+    }
+
+    if (msg.type === 'match_end') {
+      showMatchResult(msg);
       return;
     }
 
@@ -769,6 +789,27 @@ function connect() {
     setTimeout(connect, 1500);
   };
 }
+
+// ─── Team match result (shown on the mode-select screen) ─────
+function showMatchResult(msg) {
+  var el = document.getElementById('matchResult');
+  var head = msg.winner ? 'Session complete · ' + msg.winner + ' wins' : 'Session complete · draw';
+  el.innerHTML = '<div class="result-head">' + escHtml(head) + '</div>' +
+    'warm ' + msg.score.warm + ' – ' + msg.score.cool + ' cool · first to ' + scoreTarget + ' objects';
+  el.style.display = 'block';
+}
+
+function hideMatchResult() {
+  document.getElementById('matchResult').style.display = 'none';
+}
+
+// Closing or reloading the tab leaves the match right away
+window.addEventListener('pagehide', function() {
+  if (ws && ws.readyState === 1) {
+    ws.send(JSON.stringify({ type: 'leave' }));
+    ws.close();
+  }
+});
 
 // ─── Kill notice ─────────────────────────────────────────────
 var killNoticeTimer = null;
@@ -1744,9 +1785,9 @@ function updateUI() {
     if (currentMode === 'team' && p.team !== lastTeam) {
       lastTeam = p.team;
       var mates = teamPlayers(p.team);
-      var teamKills = mates.reduce(function(n, m) { return n + (m.kills || 0); }, 0);
+      var teamKills = teamScore && p.team in teamScore ? teamScore[p.team] : 0;
       heading = '<div class="class-team"><span>' + escHtml(p.team || '') + ' · ' + mates.length + '/' + teamMax +
-        '</span><span>' + teamKills + ' tp</span></div>';
+        '</span><span>' + teamKills + '/' + scoreTarget + ' tp</span></div>';
     }
     var hpPct = Math.max(0, (p.hp / p.maxHp) * 100);
     var hpColor = hpPct > 60 ? '#00ff00' : hpPct > 30 ? '#ffaa00' : '#ff3333';

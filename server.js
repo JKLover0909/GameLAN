@@ -44,6 +44,8 @@ const TEAMS = [
   { id: 'cool', name: 'cool', colors: ['#34C759', '#00C7FF', '#3F51FF'] },
 ];
 const TEAM_MAX = 3;
+const TEAM_KILL_TARGET = 20;      // first side to this many kills wins the match
+const HEARTBEAT_MS = 3000;        // drop connections that stop answering pings
 const MODES = ['free', 'team'];
 
 // ─── E skill constants (ticks at 20tps) ──────────────────────
@@ -127,6 +129,7 @@ function makeRoom(mode) {
     dashes: [],            // { x1, y1, x2, y2, color, life } — square dash trails
     blasts: [],            // { x, y, r0, r, color, life } — shield explosions
     crescents: [],         // { x, y, dx, dy, ownerId, team, color, life } — triangle E
+    score: { warm: 0, cool: 0 }, // team mode: kills per side this match
   };
 }
 const rooms = { free: makeRoom('free'), team: makeRoom('team') };
@@ -229,6 +232,7 @@ function damagePlayer(room, target, amount, attackerId) {
   }
   const attacker = room.players.get(attackerId);
   if (attacker) {
+    if (attacker.team) room.score[attacker.team]++;
     attacker.kills++;
     attacker.streak++;
     const text = STREAK_TEXT[Math.min(attacker.streak, STREAK_TEXT.length) - 1];
@@ -457,6 +461,8 @@ function gameState(room) {
     maxPlayers: room.mode === 'team' ? TEAMS.length * TEAM_MAX : MAX_PLAYERS,
     teams: room.mode === 'team' ? TEAMS : null,
     teamMax: TEAM_MAX,
+    score: room.mode === 'team' ? room.score : null,
+    scoreTarget: TEAM_KILL_TARGET,
     arena: { w: ARENA_W, h: ARENA_H, cell: CELL },
     walls: WALLS,
   };
@@ -509,6 +515,18 @@ wss.on('connection', (ws) => {
   modeSockets.add(ws);
   send(ws, { ...modeSummary(), id });
 
+  // Heartbeat: a closed tab or dropped laptop that never sends a close frame
+  // stops answering pings and is terminated by the interval below
+  ws.isAlive = true;
+  ws.on('pong', () => { ws.isAlive = true; });
+
+  // Match over: the room is torn down and every viewer returns to mode select
+  ws.kickToModes = () => {
+    room = null;
+    modeSockets.add(ws);
+    send(ws, { ...modeSummary(), id });
+  };
+
   function enterMode(mode) {
     if (room || !MODES.includes(mode)) return;
     modeSockets.delete(ws);
@@ -530,6 +548,8 @@ wss.on('connection', (ws) => {
       }
     }
     room = null;
+    // Everyone left: the next group starts a fresh match
+    if (r.players.size === 0) r.score = { warm: 0, cool: 0 };
     broadcast(r, gameState(r));
   }
 
@@ -585,6 +605,12 @@ wss.on('connection', (ws) => {
       if (!msg || typeof msg !== 'object') return;
 
       if (msg.type === 'mode') return enterMode(msg.mode);
+      // Tab closing: leave immediately instead of waiting for the socket to drop
+      if (msg.type === 'leave') {
+        modeSockets.delete(ws);
+        leaveRoom();
+        return ws.close();
+      }
       if (!room) return;
       // Back to the mode-select screen (only from the lobby, not mid-game)
       if (msg.type === 'leave_mode') {
@@ -697,6 +723,25 @@ wss.on('connection', (ws) => {
     leaveRoom();
   });
 });
+
+const heartbeat = setInterval(() => {
+  for (const c of wss.clients) {
+    if (!c.isAlive) { c.terminate(); continue; } // fires 'close' → leaveRoom
+    c.isAlive = false;
+    c.ping();
+  }
+}, HEARTBEAT_MS);
+wss.on('close', () => clearInterval(heartbeat));
+
+// Team match end: announce the winner, kick everyone and start a fresh session
+function endMatch(room) {
+  const { warm, cool } = room.score;
+  const winner = warm === cool ? null : warm > cool ? 'warm' : 'cool';
+  broadcast(room, { type: 'match_end', winner, score: { warm, cool } });
+  const sockets = [...room.sockets];
+  Object.assign(room, makeRoom(room.mode));
+  for (const c of sockets) c.kickToModes();
+}
 
 // ─── Game loop (20 tps) ──────────────────────────────────────
 let loopTicks = 0;
@@ -829,6 +874,9 @@ function tickRoom(room) {
     if (room.blasts[i].life <= 0) room.blasts.splice(i, 1);
   }
 
+  if (room.mode === 'team' && Math.max(room.score.warm, room.score.cool) >= TEAM_KILL_TARGET) {
+    return endMatch(room);
+  }
   broadcast(room, gameState(room));
 }
 
