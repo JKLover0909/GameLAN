@@ -245,6 +245,12 @@
     opacity: 0.2;
     cursor: not-allowed;
   }
+  /* Team mode: the other side's colors (or no side chosen yet) */
+  .color-swatch.locked {
+    opacity: 0.15;
+    cursor: not-allowed;
+  }
+  .color-swatch.locked:hover { border-color: transparent; }
   .color-swatch.taken .swatch-inner::after {
     content: '×';
     position: absolute;
@@ -336,12 +342,12 @@
   .team-btn:hover:not(:disabled) { border-color: #555; }
   .team-btn.selected { border-color: #4a9eff; color: #4a9eff; }
   .team-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+  .team-btn * { pointer-events: none; } /* clicks always land on the button */
   .team-btn .team-head { display: flex; align-items: center; gap: 4px; margin-bottom: 4px; }
   .team-btn .team-count { margin-left: auto; color: #555; }
   .team-btn .team-dot { width: 7px; height: 7px; border: 1.5px solid; }
   .team-btn .team-roster { min-height: 39px; color: #555; font-size: 9px; line-height: 13px; overflow: hidden; }
   .team-btn .team-roster div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .team-hint { font-size: 10px; color: #444; }
   .class-team {
     margin: 6px 0 2px; font-size: 9px; color: #555;
     text-transform: uppercase; letter-spacing: 1px;
@@ -576,7 +582,7 @@ let selectedTeam = null;
 // Lobby selections
 let selectedShape = null;
 let selectedColor = null;
-let lobbyPaletteKey = ''; // rebuild color swatches only when the offered set changes
+let lobbyPaletteKey = ''; // rebuild color swatches only when the palette changes
 
 // ─── Background image ────────────────────────────────────────
 // Chosen per player in the lobby; remembered locally between sessions
@@ -853,16 +859,15 @@ function buildLobbyColors() {
   if (!container) return;
 
   var taken = takenColors();
-  var offered = lobbyPalette();
+  var allowed = lobbyPalette();
 
-  // Only rebuild DOM when the offered colors change
-  var key = offered.map(function(c) { return c.color; }).join(',');
+  // Only rebuild DOM when the palette changes
+  var key = palette.map(function(c) { return c.color; }).join(',');
   if (key !== lobbyPaletteKey) {
     lobbyPaletteKey = key;
-    container.innerHTML = offered.length ? '' : '<div class="team-hint">Choose a side first.</div>';
-    if (selectedColor && key.indexOf(selectedColor) === -1) selectedColor = null;
-    for (var i = 0; i < offered.length; i++) {
-      var p = offered[i];
+    container.innerHTML = '';
+    for (var i = 0; i < palette.length; i++) {
+      var p = palette[i];
       var wrap = document.createElement('div');
       wrap.style.display = 'flex';
       wrap.style.flexDirection = 'column';
@@ -901,10 +906,12 @@ function buildLobbyColors() {
     var sw = swatches[k];
     var c = sw.getAttribute('data-color');
     var isTaken = taken.has(c);
+    var isLocked = !allowed.some(function(a) { return a.color === c; });
     sw.classList.toggle('taken', isTaken);
-    sw.classList.toggle('selected', c === selectedColor && !isTaken);
-    // If our selected color got taken, deselect it
-    if (c === selectedColor && isTaken) {
+    sw.classList.toggle('locked', isLocked && !isTaken);
+    sw.classList.toggle('selected', c === selectedColor && !isTaken && !isLocked);
+    // If our selected color got taken or belongs to the other side, deselect it
+    if (c === selectedColor && (isTaken || isLocked)) {
       selectedColor = null;
     }
   }
@@ -1001,10 +1008,15 @@ function buildTeamOptions() {
     var roster = members.map(function(m) {
       return '<div style="color:' + escAttr(m.color) + '">' + escHtml(m.name || m.label) + '</div>';
     }).join('');
-    btns[j].innerHTML =
+    var html =
       '<div class="team-head">' + dots + ' ' + escHtml(team.name) +
       '<span class="team-count">' + members.length + '/' + teamMax + '</span></div>' +
       '<div class="team-roster">' + (roster || '—') + '</div>';
+    // Rewriting every tick would swallow clicks landing mid-update
+    if (btns[j].getAttribute('data-html') !== html) {
+      btns[j].setAttribute('data-html', html);
+      btns[j].innerHTML = html;
+    }
   }
 }
 
@@ -1018,7 +1030,7 @@ function onTeamClick(e) {
 
 function onColorSwatchClick(e) {
   var btn = e.currentTarget;
-  if (btn.classList.contains('taken')) return;
+  if (btn.classList.contains('taken') || btn.classList.contains('locked')) return;
   selectedColor = btn.getAttribute('data-color');
   buildLobbyColors(); // refresh selection state
   validateJoinBtn();
