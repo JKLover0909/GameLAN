@@ -194,8 +194,12 @@
     border-left: 2px solid #333;
     font-size: 10px; color: #666;
     line-height: 1.6;
-    min-height: 64px;
+    /* Fixed size so hovering/selecting only swaps text, never resizes the panel */
+    box-sizing: border-box;
+    height: 168px;
+    overflow: hidden;
   }
+  #shapeInfo .info-empty { color: #444; }
   #shapeInfo.active { border-left-color: #4a9eff; }
   #shapeInfo .info-title { color: #4a9eff; margin-bottom: 2px; }
   #shapeInfo .info-cd { color: #555; margin-top: 2px; }
@@ -338,7 +342,7 @@
             rectangle
           </button>
         </div>
-        <div id="shapeInfo">Select a shape to see its E tool.</div>
+        <div id="shapeInfo"></div>
       </div>
 
       <div class="lobby-section">
@@ -774,41 +778,46 @@ function onColorSwatchClick(e) {
 
 var SHAPE_NOTES = {
   circle: {
-    title: 'E · Shield',
-    lines: ['Outer ring for 3s: blocks normal and large shots.',
-            'A beam hit breaks it. When it ends or breaks: +2 HP.'],
-    cd: 'Cooldown 5s'
+    title: 'E · Lá chắn',
+    lines: ['Tạo vòng chắn trong 3 giây, chặn đạn thường và đạn to.',
+            'Bị phá khi trúng laser. Khi hết hoặc bị phá: hồi 2 máu.'],
+    cd: 'Hồi chiêu 5 giây'
   },
   square: {
-    title: 'E · Dash',
-    lines: ['Dash toward the cursor (3× own size), 3 dmg to objects passed.',
-            'Works while charging the beam. A dash kill resets the cooldown.'],
-    cd: 'Cooldown 2s'
+    title: 'E · Lướt',
+    lines: ['Lướt về phía con trỏ (gấp 3 kích thước), gây 3 sát thương lên đối thủ bị lướt qua.',
+            'Dùng được khi đang vận laser. Lướt hạ gục sẽ hồi chiêu ngay.'],
+    cd: 'Hồi chiêu 2 giây'
   },
   rectangle: {
-    title: 'E · Twin mode',
-    lines: ['For 5s every shot, large shot and beam fires twice in parallel.',
-            'Shown as a small inner rectangle.'],
-    cd: 'Cooldown 10s'
+    title: 'E · Bắn đôi',
+    lines: ['Trong 5 giây: đạn thường, đạn to và laser đều bắn 2 đường song song.',
+            'Hiện một hình chữ nhật nhỏ bên trong.'],
+    cd: 'Hồi chiêu 10 giây'
   }
 };
+var SHAPE_NOTE_COMMON = 'Mọi hình: click để bắn (phát thứ 3 là đạn to), giữ Space để bắn laser.';
 
 function showShapeInfo(shape) {
   var el = document.getElementById('shapeInfo');
   if (!el) return;
   var note = SHAPE_NOTES[shape];
+  var common = '<div class="info-common">' + escHtml(SHAPE_NOTE_COMMON) + '</div>';
+  el.classList.toggle('active', !!note && shape === selectedShape);
   if (!note) {
-    el.classList.remove('active');
-    el.textContent = 'Select a shape to see its E tool.';
+    el.innerHTML =
+      '<div class="info-title">E · Kỹ năng</div>' +
+      '<div class="info-empty">Chọn hoặc trỏ vào một hình để xem kỹ năng E.</div>' +
+      common;
     return;
   }
-  el.classList.toggle('active', shape === selectedShape);
   el.innerHTML =
     '<div class="info-title">' + escHtml(note.title) + '</div>' +
     note.lines.map(function(l) { return '<div>' + escHtml(l) + '</div>'; }).join('') +
     '<div class="info-cd">' + escHtml(note.cd) + '</div>' +
-    '<div class="info-common">All shapes: click to shoot (every 3rd large), hold Space for beam.</div>';
+    common;
 }
+showShapeInfo(null);
 
 // ─── Lobby: validate join button ─────────────────────────────
 function validateJoinBtn() {
