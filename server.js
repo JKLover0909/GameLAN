@@ -55,6 +55,13 @@ const TWIN_OFFSET = 0.7;          // cells between parallel bullets / beams
 const STREAK_TEXT = ['+1 Object', 'Double Objects', 'Triple Objects', 'Quad Objects', 'Training 100%'];
 const NAME_MAX_LEN = 20;
 
+// Map terrain: two long black walls left and right. They block movement,
+// dashes, bullets and lasers.
+const WALLS = [
+  { x: 14, y: 8, w: 2, h: 29 },
+  { x: 64, y: 8, w: 2, h: 29 },
+];
+
 const SHAPES = {
   circle:    { w: 3, h: 3 },
   square:    { w: 3, h: 3 },
@@ -77,11 +84,38 @@ const blasts = [];           // { x, y, r0, r, color, life } — shield explosio
 let nextId = 1;
 let nextBulletId = 1;
 
-function spawnPosition() {
-  return {
-    x: Math.floor(Math.random() * (ARENA_W - 6)) + 3,
-    y: Math.floor(Math.random() * (ARENA_H - 6)) + 3,
-  };
+// True if a w×h box at (x,y) overlaps any wall (touching edges is allowed)
+function hitsWall(x, y, w, h) {
+  return WALLS.some(r => x < r.x + r.w && x + w > r.x && y < r.y + r.h && y + h > r.y);
+}
+
+// Distance along (dx,dy) from (x0,y0) to where the ray enters a wall
+// (Liang–Barsky, in units of the direction vector); Infinity if it never does
+function rayToWall(x0, y0, dx, dy) {
+  let best = Infinity;
+  for (const r of WALLS) {
+    const pv = [-dx, dx, -dy, dy];
+    const qv = [x0 - r.x, r.x + r.w - x0, y0 - r.y, r.y + r.h - y0];
+    let t0 = 0, t1 = Infinity, miss = false;
+    for (let i = 0; i < 4 && !miss; i++) {
+      if (pv[i] === 0) { if (qv[i] < 0) miss = true; continue; }
+      const t = qv[i] / pv[i];
+      if (pv[i] < 0) { if (t > t1) miss = true; else if (t > t0) t0 = t; }
+      else { if (t < t0) miss = true; else if (t < t1) t1 = t; }
+    }
+    if (!miss && t0 < best) best = t0;
+  }
+  return best;
+}
+
+function spawnPosition(w = 4, h = 3) {
+  for (;;) {
+    const pos = {
+      x: Math.floor(Math.random() * (ARENA_W - 6)) + 3,
+      y: Math.floor(Math.random() * (ARENA_H - 6)) + 3,
+    };
+    if (!hitsWall(pos.x, pos.y, w, h)) return pos;
+  }
 }
 
 function broadcast(data) {
@@ -180,7 +214,8 @@ function distToSegment(px, py, ax, ay, bx, by) {
 // Fire one laser from (cx,cy) along (ndx,ndy); pierces every player it touches
 function fireBeam(ownerId, owner, cx, cy, ndx, ndy) {
   const hitIds = new Set();
-  const maxDist = Math.sqrt(ARENA_W * ARENA_W + ARENA_H * ARENA_H);
+  // The laser stops where it meets a wall
+  const maxDist = Math.min(Math.sqrt(ARENA_W * ARENA_W + ARENA_H * ARENA_H), rayToWall(cx, cy, ndx, ndy));
   for (let t = 0; t < maxDist; t += 0.3) {
     const rx = cx + ndx * t;
     const ry = cy + ndy * t;
@@ -206,6 +241,7 @@ function fireBeam(ownerId, owner, cx, cy, ndx, ndy) {
   beams.push({
     x: cx, y: cy,
     dx: ndx, dy: ndy,
+    len: maxDist,   // cut short by walls
     ownerId,
     color: owner.color,
     life: BEAM_DISPLAY_TICKS,
@@ -226,8 +262,15 @@ function useSkill(id, p, tx, ty) {
     const dist = Math.hypot(ddx, ddy);
     if (dist < 0.1) return;
     const len = Math.max(p.w, p.h) * DASH_DISTANCE_MULT;
-    p.x = Math.max(0, Math.min(ARENA_W - p.w, p.x + (ddx / dist) * len));
-    p.y = Math.max(0, Math.min(ARENA_H - p.h, p.y + (ddy / dist) * len));
+    // Step along the dash path and stop just before a wall
+    const steps = Math.ceil(len / 0.1);
+    for (let s = 1; s <= steps; s++) {
+      const nx = Math.max(0, Math.min(ARENA_W - p.w, p.x + (ddx / dist) * (len / steps)));
+      const ny = Math.max(0, Math.min(ARENA_H - p.h, p.y + (ddy / dist) * (len / steps)));
+      if (hitsWall(nx, ny, p.w, p.h)) break;
+      p.x = nx;
+      p.y = ny;
+    }
     const end = bodyCenter(p);
     p.skillCooldown = SKILL_COOLDOWN.square;
 
@@ -279,7 +322,7 @@ function gameState() {
     color: b.color, ownerId: b.ownerId,
   }));
   const beamList = beams.map(b => ({
-    x: b.x, y: b.y, dx: b.dx, dy: b.dy,
+    x: b.x, y: b.y, dx: b.dx, dy: b.dy, len: b.len,
     color: b.color, ownerId: b.ownerId, life: b.life,
     maxLife: BEAM_DISPLAY_TICKS,
   }));
@@ -293,6 +336,7 @@ function gameState() {
     palette: PALETTE,
     maxPlayers: MAX_PLAYERS,
     arena: { w: ARENA_W, h: ARENA_H, cell: CELL },
+    walls: WALLS,
   };
 }
 
@@ -498,7 +542,7 @@ setInterval(() => {
     if (p.joinTicks > 0) {
       p.joinTicks--;
       if (p.joinTicks === 0) {
-        const pos = spawnPosition();
+        const pos = spawnPosition(p.w, p.h);
         p.x = pos.x;
         p.y = pos.y;
       }
@@ -528,7 +572,7 @@ setInterval(() => {
       p.respawnTimer--;
       if (p.respawnTimer <= 0) {
         // Respawn
-        const pos = spawnPosition();
+        const pos = spawnPosition(p.w, p.h);
         p.x = pos.x;
         p.y = pos.y;
         p.hp = MAX_HP;
@@ -542,20 +586,22 @@ setInterval(() => {
       const speedMult = p.charging ? CHARGE_SPEED_MULT : 1;
       const nx = p.x + p.dx * SPEED * speedMult;
       const ny = p.y + p.dy * SPEED * speedMult;
-      if (nx >= 0 && nx + p.w <= ARENA_W) p.x = nx;
-      if (ny >= 0 && ny + p.h <= ARENA_H) p.y = ny;
+      if (nx >= 0 && nx + p.w <= ARENA_W && !hitsWall(nx, p.y, p.w, p.h)) p.x = nx;
+      if (ny >= 0 && ny + p.h <= ARENA_H && !hitsWall(p.x, ny, p.w, p.h)) p.y = ny;
     }
   }
 
   // Move bullets & collision
   for (let i = bullets.length - 1; i >= 0; i--) {
     const b = bullets[i];
+    // Swept check so a fast bullet cannot skip over a thin wall in one tick
+    const wallHit = rayToWall(b.x, b.y, b.vx, b.vy) <= 1;
     b.x += b.vx;
     b.y += b.vy;
     b.life--;
 
-    // Out of bounds or expired
-    if (b.x < -1 || b.x > ARENA_W + 1 || b.y < -1 || b.y > ARENA_H + 1 || b.life <= 0) {
+    // Hit a wall, out of bounds or expired
+    if (wallHit || b.x < -1 || b.x > ARENA_W + 1 || b.y < -1 || b.y > ARENA_H + 1 || b.life <= 0) {
       bullets.splice(i, 1);
       continue;
     }
