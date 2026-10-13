@@ -44,6 +44,9 @@ const SKILL_COOLDOWN = { circle: 100, square: 40, rectangle: 200 };
 const SHIELD_TICKS = 60;          // circle: 3s shield
 const SHIELD_PADDING = 1.2;       // cells beyond the body radius
 const SHIELD_HEAL = 2;
+const SHIELD_BLAST_DAMAGE = 2;    // shield explodes when it expires or breaks
+const SHIELD_BLAST_EXTRA = 1.5;   // blast reach beyond the shield ring (cells)
+const BLAST_DISPLAY_TICKS = 8;
 const DASH_DISTANCE_MULT = 3;     // square: 3× own size
 const DASH_DAMAGE = 3;
 const DASH_DISPLAY_TICKS = 6;
@@ -70,6 +73,7 @@ const players = new Map();   // id → player
 const bullets = [];          // { x, y, vx, vy, ownerId, big, size, color }
 const beams = [];            // { x, y, dx, dy, ownerId, color, life }
 const dashes = [];           // { x1, y1, x2, y2, color, life } — square dash trails
+const blasts = [];           // { x, y, r0, r, color, life } — shield explosions
 let nextId = 1;
 let nextBulletId = 1;
 
@@ -141,11 +145,28 @@ function shieldRadius(p) {
   return Math.max(p.w, p.h) / 2 + SHIELD_PADDING;
 }
 
-// Shield ends (expired or broken by a laser): heal and start the cooldown
-function endShield(p) {
+// Distance from point (px,py) to the nearest point of a player's box
+function distToBox(px, py, p) {
+  const cx = Math.max(p.x, Math.min(px, p.x + p.w));
+  const cy = Math.max(p.y, Math.min(py, p.y + p.h));
+  return Math.hypot(px - cx, py - cy);
+}
+
+// Shield ends (expired or broken by a laser): heal, explode, start the cooldown
+function endShield(id, p) {
   p.shieldTicks = 0;
   p.hp = Math.min(MAX_HP, p.hp + SHIELD_HEAL);
   p.skillCooldown = SKILL_COOLDOWN.circle;
+
+  const c = bodyCenter(p);
+  const r0 = shieldRadius(p);
+  const r = r0 + SHIELD_BLAST_EXTRA;
+  for (const [pid, target] of players) {
+    // Another active shield soaks the blast without breaking
+    if (pid === id || target.dead || target.joinTicks > 0 || target.shieldTicks > 0) continue;
+    if (distToBox(c.x, c.y, target) <= r) damagePlayer(target, SHIELD_BLAST_DAMAGE, id);
+  }
+  blasts.push({ ownerId: id, x: c.x, y: c.y, r0, r, color: p.color, life: BLAST_DISPLAY_TICKS });
 }
 
 // Distance from point (px,py) to segment (ax,ay)-(bx,by)
@@ -171,15 +192,12 @@ function fireBeam(ownerId, owner, cx, cy, ndx, ndy) {
         const c = bodyCenter(target);
         if (Math.hypot(rx - c.x, ry - c.y) <= shieldRadius(target) + BEAM_WIDTH / 2) {
           hitIds.add(pid);
-          endShield(target);
+          endShield(pid, target);
         }
         continue;
       }
       // Check if ray point is within BEAM_WIDTH/2 of target box
-      const closestX = Math.max(target.x, Math.min(rx, target.x + target.w));
-      const closestY = Math.max(target.y, Math.min(ry, target.y + target.h));
-      const distToBox = Math.sqrt((rx - closestX) ** 2 + (ry - closestY) ** 2);
-      if (distToBox <= BEAM_WIDTH / 2) {
+      if (distToBox(rx, ry, target) <= BEAM_WIDTH / 2) {
         hitIds.add(pid);
         damagePlayer(target, BEAM_DAMAGE, ownerId);
       }
@@ -215,7 +233,8 @@ function useSkill(id, p, tx, ty) {
 
     let killed = false;
     for (const [pid, target] of players) {
-      if (pid === id || target.dead || target.joinTicks > 0) continue;
+      // A shielded circle is immune to the dash and the shield holds
+      if (pid === id || target.dead || target.joinTicks > 0 || target.shieldTicks > 0) continue;
       const c = bodyCenter(target);
       const reach = (Math.max(p.w, p.h) + Math.max(target.w, target.h)) / 2;
       if (distToSegment(c.x, c.y, start.x, start.y, end.x, end.y) <= reach) {
@@ -270,6 +289,7 @@ function gameState() {
     bullets: bList,
     beams: beamList,
     dashes: dashes.map(d => ({ ...d, maxLife: DASH_DISPLAY_TICKS })),
+    blasts: blasts.map(b => ({ ...b, maxLife: BLAST_DISPLAY_TICKS })),
     palette: PALETTE,
     maxPlayers: MAX_PLAYERS,
     arena: { w: ARENA_W, h: ARENA_H, cell: CELL },
@@ -464,6 +484,9 @@ wss.on('connection', (ws) => {
     for (let i = dashes.length - 1; i >= 0; i--) {
       if (dashes[i].ownerId === id) dashes.splice(i, 1);
     }
+    for (let i = blasts.length - 1; i >= 0; i--) {
+      if (blasts[i].ownerId === id) blasts.splice(i, 1);
+    }
     broadcast(gameState());
   });
 });
@@ -471,7 +494,7 @@ wss.on('connection', (ws) => {
 // ─── Game loop (20 tps) ──────────────────────────────────────
 setInterval(() => {
   // Move players & tick cooldowns
-  for (const [, p] of players) {
+  for (const [id, p] of players) {
     if (p.joinTicks > 0) {
       p.joinTicks--;
       if (p.joinTicks === 0) {
@@ -487,7 +510,7 @@ setInterval(() => {
     // Tick active E effects
     if (p.shieldTicks > 0 && !p.dead) {
       p.shieldTicks--;
-      if (p.shieldTicks === 0) endShield(p);
+      if (p.shieldTicks === 0) endShield(id, p);
     }
     if (p.upgradeTicks > 0 && !p.dead) {
       p.upgradeTicks--;
@@ -571,6 +594,10 @@ setInterval(() => {
   for (let i = dashes.length - 1; i >= 0; i--) {
     dashes[i].life--;
     if (dashes[i].life <= 0) dashes.splice(i, 1);
+  }
+  for (let i = blasts.length - 1; i >= 0; i--) {
+    blasts[i].life--;
+    if (blasts[i].life <= 0) blasts.splice(i, 1);
   }
 
   broadcast(gameState());

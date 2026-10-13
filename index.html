@@ -481,6 +481,7 @@ let players = [];
 let bullets = [];
 let gameBeams = [];
 let gameDashes = [];
+let gameBlasts = [];
 let palette = []; // [{color, name}] from server
 let ws;
 let keysDown = new Set();
@@ -596,6 +597,7 @@ function connect() {
       bullets = msg.bullets || [];
       gameBeams = msg.beams || [];
       gameDashes = msg.dashes || [];
+      gameBlasts = msg.blasts || [];
       if (msg.palette) palette = msg.palette;
       resizeCanvas();
       determineClientState();
@@ -615,6 +617,7 @@ function connect() {
       bullets = msg.bullets || [];
       gameBeams = msg.beams || [];
       gameDashes = msg.dashes || [];
+      gameBlasts = msg.blasts || [];
       if (msg.palette) palette = msg.palette;
       determineClientState();
       updateOverlay();
@@ -847,8 +850,8 @@ function onColorSwatchClick(e) {
 var SHAPE_NOTES = {
   circle: {
     title: 'E · Lá chắn',
-    lines: ['Tạo vòng chắn trong 3 giây, chặn đạn thường và đạn to.',
-            'Bị phá khi trúng laser. Khi hết hoặc bị phá: hồi 2 máu.'],
+    lines: ['Tạo vòng chắn trong 3 giây, chặn đạn và không bị lướt phá.',
+            'Bị phá khi trúng laser. Khi hết hoặc bị phá: hồi 2 máu, nổ gây 2 sát thương xung quanh.'],
     cd: 'Hồi chiêu 5 giây'
   },
   square: {
@@ -1230,6 +1233,21 @@ function render() {
     ctx.restore();
   }
 
+  // ── Draw shield blasts: expanding dashed ring, stroke only ──
+  for (var bli = 0; bli < gameBlasts.length; bli++) {
+    var bl = gameBlasts[bli];
+    var blT = 1 - bl.life / bl.maxLife; // 0 → 1 over the blast lifetime
+    ctx.save();
+    ctx.globalAlpha = 0.9 * (1 - blT);
+    ctx.strokeStyle = bl.color;
+    ctx.lineWidth = 2;
+    ctx.setLineDash([4, 3]);
+    ctx.beginPath();
+    ctx.arc(bl.x * cellSize, bl.y * cellSize, (bl.r0 + (bl.r - bl.r0) * blT) * cellSize, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+  }
+
   // ── Draw energy beams ──
   for (var bei = 0; bei < gameBeams.length; bei++) {
     var beam = gameBeams[bei];
@@ -1360,7 +1378,7 @@ function updateUI() {
 }
 
 var SKILL_INFO = {
-  circle:    { desc: 'E → shield 3s (+2 HP)', name: 'Shield' },
+  circle:    { desc: 'E → shield 3s (+2 HP, blast)', name: 'Shield' },
   square:    { desc: 'E → dash (×3 dmg)',     name: 'Dash' },
   rectangle: { desc: 'E → twin mode 5s',      name: 'Twin mode' }
 };
