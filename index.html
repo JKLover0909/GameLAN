@@ -1517,6 +1517,77 @@ function strokeDash(d) {
   ctx.restore();
 }
 
+// Shield blast: a white flash, the shield ring breaking into arcs that
+// fly apart, a shockwave out to the blast reach and radial sparks
+function strokeBlast(bl) {
+  var t = 1 - bl.life / bl.maxLife;    // 0 → 1 over the blast lifetime
+  var ease = 1 - (1 - t) * (1 - t);    // fast start, soft finish
+  var x = bl.x * cellSize, y = bl.y * cellSize;
+  var r0 = bl.r0 * cellSize, r = bl.r * cellSize;
+  ctx.save();
+  ctx.lineCap = 'round';
+  ctx.shadowColor = bl.color;
+
+  // Flash: the shield edge burns white for an instant
+  if (t < 0.35) {
+    ctx.globalAlpha = 1 - t / 0.35;
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 4;
+    ctx.shadowBlur = 20;
+    ctx.beginPath();
+    ctx.arc(x, y, r0 * (1 + t * 0.3), 0, Math.PI * 2);
+    ctx.stroke();
+  }
+
+  // Shockwave: thick leading ring and a thin dashed echo behind it
+  ctx.strokeStyle = bl.color;
+  ctx.shadowBlur = 14;
+  ctx.globalAlpha = 0.95 * (1 - t);
+  ctx.lineWidth = 1 + 4 * (1 - t);
+  ctx.beginPath();
+  ctx.arc(x, y, r0 + (r - r0) * ease, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.globalAlpha = 0.6 * (1 - t);
+  ctx.lineWidth = 1.2;
+  ctx.setLineDash([5, 4]);
+  ctx.beginPath();
+  ctx.arc(x, y, r0 + (r - r0) * ease * 0.6, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  // Shield shell breaks into arcs that drift out and spin
+  var pieces = 8;
+  ctx.shadowBlur = 8;
+  ctx.lineWidth = 2.5 * (1 - t * 0.6);
+  for (var i = 0; i < pieces; i++) {
+    var mid = (i + 0.5) / pieces * Math.PI * 2 + t * (i % 2 ? 0.6 : -0.6);
+    var span = (Math.PI / pieces) * (0.8 - t * 0.5);
+    var pr = r0 + (r - r0) * 0.55 * ease; // trails behind the shockwave
+    ctx.globalAlpha = 0.9 * (1 - t);
+    ctx.beginPath();
+    ctx.arc(x, y, pr, mid - span, mid + span);
+    ctx.stroke();
+  }
+
+  // Radial sparks shooting past the shockwave
+  var sparks = 14;
+  ctx.lineWidth = 1.5;
+  ctx.shadowBlur = 6;
+  for (var k = 0; k < sparks; k++) {
+    var a = (k / sparks) * Math.PI * 2 + (k % 3) * 0.13;
+    var reach = r * (1 + 0.3 * ((k * 7) % 5) / 4);
+    var head = r0 * 0.9 + (reach - r0 * 0.9) * ease;
+    var tail = head - (r - r0 + 10) * 0.8 * (1 - t);
+    ctx.globalAlpha = 1 - t;
+    ctx.strokeStyle = k % 2 ? '#ffffff' : bl.color;
+    ctx.beginPath();
+    ctx.moveTo(x + Math.cos(a) * tail, y + Math.sin(a) * tail);
+    ctx.lineTo(x + Math.cos(a) * head, y + Math.sin(a) * head);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
 // ─── Death shatter: the outline breaks into flying stroke fragments ───
 var SHARD_MS = 900;
 var shards = []; // { x, y, hx, hy, vx, vy, spin, color, born } in cells
@@ -1840,20 +1911,8 @@ function render() {
   // ── Draw triangle crescents ──
   for (var cri = 0; cri < gameCrescents.length; cri++) strokeCrescent(gameCrescents[cri]);
 
-  // ── Draw shield blasts: expanding dashed ring, stroke only ──
-  for (var bli = 0; bli < gameBlasts.length; bli++) {
-    var bl = gameBlasts[bli];
-    var blT = 1 - bl.life / bl.maxLife; // 0 → 1 over the blast lifetime
-    ctx.save();
-    ctx.globalAlpha = 0.9 * (1 - blT);
-    ctx.strokeStyle = bl.color;
-    ctx.lineWidth = 2;
-    ctx.setLineDash([4, 3]);
-    ctx.beginPath();
-    ctx.arc(bl.x * cellSize, bl.y * cellSize, (bl.r0 + (bl.r - bl.r0) * blT) * cellSize, 0, Math.PI * 2);
-    ctx.stroke();
-    ctx.restore();
-  }
+  // ── Draw shield blasts ──
+  for (var bli = 0; bli < gameBlasts.length; bli++) strokeBlast(gameBlasts[bli]);
 
   // ── Draw energy beams ──
   for (var bei = 0; bei < gameBeams.length; bei++) {
