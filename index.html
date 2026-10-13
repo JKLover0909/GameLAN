@@ -1455,6 +1455,68 @@ function strokeTwinBullet(b, bpx, bpy, bsz) {
   ctx.restore();
 }
 
+// Square dash: ghost outlines along the path, speed lines from the
+// corners and corner brackets snapping outward at the landing spot
+function strokeDash(d) {
+  var t = 1 - d.life / d.maxLife; // 0 → 1 over the trail lifetime
+  var x1 = d.x1 * cellSize, y1 = d.y1 * cellSize;
+  var x2 = d.x2 * cellSize, y2 = d.y2 * cellSize;
+  var half = (d.size || 3) * cellSize / 2;
+  var len = Math.hypot(x2 - x1, y2 - y1) || 1;
+  var ux = (x2 - x1) / len, uy = (y2 - y1) / len;
+  ctx.save();
+  ctx.strokeStyle = d.color;
+  ctx.lineJoin = 'miter';
+  ctx.lineCap = 'round';
+
+  // Speed lines: from each side of the box, fading toward the start
+  var grad = ctx.createLinearGradient(x1, y1, x2, y2);
+  grad.addColorStop(0, 'rgba(0,0,0,0)');
+  grad.addColorStop(1, d.color);
+  ctx.strokeStyle = grad;
+  ctx.globalAlpha = 0.9 * (1 - t);
+  var lanes = [-0.9, -0.35, 0.35, 0.9];
+  for (var l = 0; l < lanes.length; l++) {
+    var ox = -uy * half * lanes[l], oy = ux * half * lanes[l];
+    var shrink = t * len * 0.8;          // tail catches up with the head
+    ctx.lineWidth = l === 0 || l === 3 ? 2 : 1;
+    ctx.beginPath();
+    ctx.moveTo(x1 + ux * shrink + ox, y1 + uy * shrink + oy);
+    ctx.lineTo(x2 - ux * half + ox, y2 - uy * half + oy);
+    ctx.stroke();
+  }
+
+  // Ghost outlines, older ones fainter and slightly smaller
+  ctx.strokeStyle = d.color;
+  var ghosts = 4;
+  for (var g = 0; g < ghosts; g++) {
+    var f = g / ghosts;                  // 0 = start of the path
+    var gx = x1 + (x2 - x1) * f, gy = y1 + (y2 - y1) * f;
+    var gh = half * (0.7 + 0.3 * f);
+    ctx.globalAlpha = (0.15 + 0.45 * f) * (1 - t);
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(gx - gh, gy - gh, gh * 2, gh * 2);
+  }
+
+  // Landing: corner brackets fly outward and fade
+  var spread = half + 4 + t * 14;
+  var cl = Math.max(4, half * 0.5 * (1 - t * 0.5));
+  ctx.globalAlpha = 1 - t;
+  ctx.lineWidth = 3;
+  ctx.shadowColor = d.color;
+  ctx.shadowBlur = 10;
+  for (var c = 0; c < 4; c++) {
+    var sx = c & 1 ? 1 : -1, sy = c & 2 ? 1 : -1;
+    var cx = x2 + sx * spread, cy = y2 + sy * spread;
+    ctx.beginPath();
+    ctx.moveTo(cx - sx * cl, cy);
+    ctx.lineTo(cx, cy);
+    ctx.lineTo(cx, cy - sy * cl);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
 // ─── Death shatter: the outline breaks into flying stroke fragments ───
 var SHARD_MS = 900;
 var shards = []; // { x, y, hx, hy, vx, vy, spin, color, born } in cells
@@ -1773,18 +1835,7 @@ function render() {
   drawDeathShards();
 
   // ── Draw square dash trails ──
-  for (var dsi = 0; dsi < gameDashes.length; dsi++) {
-    var dsh = gameDashes[dsi];
-    ctx.save();
-    ctx.globalAlpha = 0.8 * (dsh.life / dsh.maxLife);
-    ctx.strokeStyle = dsh.color;
-    ctx.lineWidth = 3;
-    ctx.beginPath();
-    ctx.moveTo(dsh.x1 * cellSize, dsh.y1 * cellSize);
-    ctx.lineTo(dsh.x2 * cellSize, dsh.y2 * cellSize);
-    ctx.stroke();
-    ctx.restore();
-  }
+  for (var dsi = 0; dsi < gameDashes.length; dsi++) strokeDash(gameDashes[dsi]);
 
   // ── Draw triangle crescents ──
   for (var cri = 0; cri < gameCrescents.length; cri++) strokeCrescent(gameCrescents[cri]);

@@ -61,7 +61,7 @@ const BLAST_DISPLAY_TICKS = 8;
 const DASH_DISTANCE_MULT = 3;     // square: 3× own size
 const DASH_MIN_MOVE = 0.05;       // dashes shorter than this are refunded
 const DASH_DAMAGE = 3;
-const DASH_DISPLAY_TICKS = 6;
+const DASH_DISPLAY_TICKS = 9;
 const UPGRADE_TICKS = 100;        // rectangle: 5s upgraded state
 const TWIN_OFFSET = 0.7;          // cells between parallel bullets / beams
 const CRESCENT_SPEED = BULLET_SPEED * 1.3; // triangle: 30% faster than a bullet
@@ -367,7 +367,7 @@ function useSkill(room, id, p, tx, ty) {
       }
     }
     if (killed) p.skillCooldown = 0;   // a dash kill refreshes the dash
-    room.dashes.push({ ownerId: id, x1: start.x, y1: start.y, x2: end.x, y2: end.y, color: p.color, life: DASH_DISPLAY_TICKS });
+    room.dashes.push({ ownerId: id, x1: start.x, y1: start.y, x2: end.x, y2: end.y, size: p.w, color: p.color, life: DASH_DISPLAY_TICKS });
   }
 }
 
