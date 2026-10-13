@@ -49,6 +49,7 @@ const DASH_DAMAGE = 3;
 const DASH_DISPLAY_TICKS = 6;
 const UPGRADE_TICKS = 100;        // rectangle: 5s upgraded state
 const TWIN_OFFSET = 0.7;          // cells between parallel bullets / beams
+const STREAK_TEXT = ['+1 Object', 'Double Objects', 'Triple Objects', 'Quad Objects', 'Training 100%'];
 const NAME_MAX_LEN = 20;
 
 const SHAPES = {
@@ -115,6 +116,7 @@ function damagePlayer(target, amount, attackerId) {
   target.deaths++;
   target.charging = false;
   target.chargeTicks = 0;
+  target.streak = 0;
   // Effects end silently on death; their cooldown still applies
   if (target.shieldTicks > 0 || target.upgradeTicks > 0) {
     target.shieldTicks = 0;
@@ -122,7 +124,12 @@ function damagePlayer(target, amount, attackerId) {
     target.skillCooldown = SKILL_COOLDOWN[target.shape];
   }
   const attacker = players.get(attackerId);
-  if (attacker) attacker.kills++;
+  if (attacker) {
+    attacker.kills++;
+    attacker.streak++;
+    const text = STREAK_TEXT[Math.min(attacker.streak, STREAK_TEXT.length) - 1];
+    send(attacker.ws, { type: 'kill', streak: attacker.streak, text });
+  }
   return true;
 }
 
@@ -240,6 +247,7 @@ function gameState() {
       shieldTicks: p.shieldTicks, shieldMax: SHIELD_TICKS,
       shieldRadius: shieldRadius(p),
       upgradeTicks: p.upgradeTicks, upgradeMax: UPGRADE_TICKS,
+      streak: p.streak,
       beamCooldown: p.beamCooldown,
       joining: p.joinTicks > 0,
       joinProgress: p.joinTicks > 0 ? 1 - p.joinTicks / JOIN_DELAY_TICKS : 1,
@@ -330,6 +338,7 @@ wss.on('connection', (ws) => {
       skillCooldown: 0, // ticks until E can be used again
       shieldTicks: 0,   // circle: active shield time left
       upgradeTicks: 0,  // rectangle: active upgrade time left
+      streak: 0,        // kills since last death
       kills: 0,
       deaths: 0,
       ws,
