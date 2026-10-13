@@ -1013,26 +1013,6 @@ function strokeShape(ctx, px, py, pw, ph, shape) {
   }
 }
 
-// Distance along a unit ray to the first wall it enters (Infinity if none);
-// mirrors the server so the aim line stops where the laser will
-function rayToWall(x0, y0, dx, dy) {
-  var best = Infinity;
-  for (var i = 0; i < walls.length; i++) {
-    var r = walls[i];
-    var pv = [-dx, dx, -dy, dy];
-    var qv = [x0 - r.x, r.x + r.w - x0, y0 - r.y, r.y + r.h - y0];
-    var t0 = 0, t1 = Infinity, miss = false;
-    for (var k = 0; k < 4 && !miss; k++) {
-      if (pv[k] === 0) { if (qv[k] < 0) miss = true; continue; }
-      var t = qv[k] / pv[k];
-      if (pv[k] < 0) { if (t > t1) miss = true; else if (t > t0) t0 = t; }
-      else { if (t < t0) miss = true; else if (t < t1) t1 = t; }
-    }
-    if (!miss && t0 < best) best = t0;
-  }
-  return best;
-}
-
 // Draw corner markers for rect shapes
 function drawCornerMarkers(ctx, px, py, pw, ph, color) {
   var cLen = Math.min(8, pw * 0.25, ph * 0.25);
@@ -1296,7 +1276,6 @@ function render() {
     var fade = beam.life / beam.maxLife;
 
     var maxLen = Math.sqrt(Math.pow(arenaW * cellSize, 2) + Math.pow(arenaH * cellSize, 2));
-    if (beam.len) maxLen = Math.min(maxLen, beam.len * cellSize); // stopped by a wall
     var bex = bsx + beam.dx * maxLen;
     var bey = bsy + beam.dy * maxLen;
 
@@ -1351,7 +1330,6 @@ function render() {
         var ndx = ddx / dist;
         var ndy = ddy / dist;
         var maxL = Math.sqrt(Math.pow(arenaW * cellSize, 2) + Math.pow(arenaH * cellSize, 2));
-        maxL = Math.min(maxL, rayToWall(cx / cellSize, cy / cellSize, ndx, ndy) * cellSize);
         var aex = cx + ndx * maxL;
         var aey = cy + ndy * maxL;
 

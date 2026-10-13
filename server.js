@@ -56,7 +56,7 @@ const STREAK_TEXT = ['+1 Object', 'Double Objects', 'Triple Objects', 'Quad Obje
 const NAME_MAX_LEN = 20;
 
 // Map terrain: two long black walls left and right. They block movement,
-// dashes, bullets and lasers.
+// dashes and bullets; lasers pierce them.
 const WALLS = [
   { x: 14, y: 8, w: 2, h: 29 },
   { x: 64, y: 8, w: 2, h: 29 },
@@ -214,8 +214,8 @@ function distToSegment(px, py, ax, ay, bx, by) {
 // Fire one laser from (cx,cy) along (ndx,ndy); pierces every player it touches
 function fireBeam(ownerId, owner, cx, cy, ndx, ndy) {
   const hitIds = new Set();
-  // The laser stops where it meets a wall
-  const maxDist = Math.min(Math.sqrt(ARENA_W * ARENA_W + ARENA_H * ARENA_H), rayToWall(cx, cy, ndx, ndy));
+  // The laser pierces walls (only bullets are blocked by them)
+  const maxDist = Math.sqrt(ARENA_W * ARENA_W + ARENA_H * ARENA_H);
   for (let t = 0; t < maxDist; t += 0.3) {
     const rx = cx + ndx * t;
     const ry = cy + ndy * t;
@@ -241,7 +241,6 @@ function fireBeam(ownerId, owner, cx, cy, ndx, ndy) {
   beams.push({
     x: cx, y: cy,
     dx: ndx, dy: ndy,
-    len: maxDist,   // cut short by walls
     ownerId,
     color: owner.color,
     life: BEAM_DISPLAY_TICKS,
@@ -322,7 +321,7 @@ function gameState() {
     color: b.color, ownerId: b.ownerId,
   }));
   const beamList = beams.map(b => ({
-    x: b.x, y: b.y, dx: b.dx, dy: b.dy, len: b.len,
+    x: b.x, y: b.y, dx: b.dx, dy: b.dy,
     color: b.color, ownerId: b.ownerId, life: b.life,
     maxLife: BEAM_DISPLAY_TICKS,
   }));
