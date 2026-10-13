@@ -65,7 +65,7 @@ const TWIN_OFFSET = 0.7;          // cells between parallel bullets / beams
 const CRESCENT_SPEED = BULLET_SPEED * 1.3; // triangle: 30% faster than a bullet
 const CRESCENT_DAMAGE = 3;
 const CRESCENT_AREA_MULT = 2;     // crescent area = 2× the triangle's area
-const CRESCENT_SUBSTEPS = 2;      // so it cannot skip over a thin wall or body
+const CRESCENT_SUBSTEPS = 2;      // so it cannot skip over a thin body
 const CRESCENT_LIFE = 200;        // max ticks alive
 const SLOW_TICKS = 40;            // 2s slow on hit
 const SLOW_SPEED_MULT = 0.7;      // slowed targets move 30% slower
@@ -329,7 +329,7 @@ function useSkill(room, id, p, tx, ty) {
     const dist = Math.hypot(ddx, ddy);
     if (dist < 0.1) return;
     p.skillCooldown = SKILL_COOLDOWN.triangle;
-    room.crescents.push({ x: c.x, y: c.y, dx: ddx / dist, dy: ddy / dist, ownerId: id, team: p.team, color: p.color, life: CRESCENT_LIFE });
+    room.crescents.push({ x: c.x, y: c.y, dx: ddx / dist, dy: ddy / dist, ownerId: id, team: p.team, color: p.color, life: CRESCENT_LIFE, hitIds: new Set() });
   } else if (p.shape === 'square') {
     const start = bodyCenter(p);
     const ddx = tx - start.x;
@@ -372,28 +372,31 @@ function crescentPoints(c) {
   return CRESCENT.points.map(([lx, ly]) => [c.x + c.dx * lx - c.dy * ly, c.y + c.dy * lx + c.dx * ly]);
 }
 
-// Advance one crescent by a tick: 'fly', or why it is spent ('wall', 'hit', 'gone')
+// Advance one crescent by a tick: 'fly', or 'gone' once it leaves the arena
 function stepCrescent(room, c) {
   for (let s = 0; s < CRESCENT_SUBSTEPS; s++) {
     c.x += c.dx * CRESCENT_SPEED / CRESCENT_SUBSTEPS;
     c.y += c.dy * CRESCENT_SPEED / CRESCENT_SUBSTEPS;
     const m = CRESCENT.r + 1;
     if (c.x < -m || c.x > ARENA_W + m || c.y < -m || c.y > ARENA_H + m) return 'gone';
+    // Pierces walls and bodies; each target is hit at most once
     const pts = crescentPoints(c);
-    if (pts.some(([x, y]) => hitsWall(x, y, 0, 0))) return 'wall';
     for (const [pid, target] of room.players) {
-      if (pid === c.ownerId || target.dead || target.joinTicks > 0) continue;
+      if (pid === c.ownerId || target.dead || target.joinTicks > 0 || c.hitIds.has(pid)) continue;
       if (allies(c.team, target.team)) continue; // passes through teammates
       if (target.shieldTicks > 0) {
-        // The shield blocks the crescent and holds
+        // The crescent breaks the shield (like a laser) and flies on
         const tc = bodyCenter(target);
         const sr = shieldRadius(target);
-        if (pts.some(([x, y]) => Math.hypot(x - tc.x, y - tc.y) <= sr)) return 'hit';
+        if (pts.some(([x, y]) => Math.hypot(x - tc.x, y - tc.y) <= sr)) {
+          c.hitIds.add(pid);
+          endShield(room, pid, target);
+        }
         continue;
       }
       if (pts.some(([x, y]) => x >= target.x && x <= target.x + target.w && y >= target.y && y <= target.y + target.h)) {
+        c.hitIds.add(pid);
         if (!damagePlayer(room, target, CRESCENT_DAMAGE, c.ownerId)) target.slowTicks = SLOW_TICKS;
-        return 'hit';
       }
     }
   }
@@ -806,17 +809,10 @@ function tickRoom(room) {
     }
   }
 
-  // Move crescents: blocked by walls and shields, stop at the first body hit
+  // Move crescents: pierce walls, bodies and shields until they leave the arena
   for (let i = room.crescents.length - 1; i >= 0; i--) {
     const c = room.crescents[i];
-    const fresh = c.life === CRESCENT_LIFE;
-    const result = stepCrescent(room, c);
-    // Fired point-blank into a wall: the skill is not wasted
-    if (result === 'wall' && fresh) {
-      const owner = room.players.get(c.ownerId);
-      if (owner) owner.skillCooldown = 0;
-    }
-    if (result !== 'fly' || --c.life <= 0) room.crescents.splice(i, 1);
+    if (stepCrescent(room, c) !== 'fly' || --c.life <= 0) room.crescents.splice(i, 1);
   }
 
   // Tick beam display lifetime

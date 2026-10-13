@@ -1088,7 +1088,7 @@ var SHAPE_NOTES = {
   triangle: {
     title: 'E · Lưỡi liềm',
     lines: ['Phóng lưỡi liềm to gấp đôi thân, bay nhanh hơn đạn 30%, gây 3 sát thương.',
-            'Trúng đích làm chậm 30% trong 2 giây. Bị tường và lá chắn chặn.'],
+            'Trúng đích làm chậm 30% trong 2 giây. Xuyên tường, xuyên người, phá lá chắn.'],
     cd: 'Hồi chiêu 4 giây'
   }
 };
@@ -1265,7 +1265,7 @@ function strokeCrescent(c) {
   ctx.translate(c.x * cellSize, c.y * cellSize);
   ctx.rotate(Math.atan2(c.dy, c.dx));
   ctx.strokeStyle = c.color;
-  ctx.lineWidth = 2;
+  ctx.lineWidth = 3;
   ctx.beginPath();
   ctx.arc(0, 0, r, -outerA, outerA, false);
   ctx.arc(-b, 0, r, innerA, -innerA, true);
@@ -1344,7 +1344,7 @@ function drawDeathShards() {
     ctx.save();
     ctx.globalAlpha = 1 - k;
     ctx.strokeStyle = s.color;
-    ctx.lineWidth = 2;
+    ctx.lineWidth = 3;
     ctx.beginPath();
     ctx.moveTo(x - hx, y - hy);
     ctx.lineTo(x + hx, y + hy);
@@ -1356,8 +1356,8 @@ function drawDeathShards() {
 
 // Draw corner markers for rect shapes
 function drawCornerMarkers(ctx, px, py, pw, ph, color) {
-  var cLen = Math.min(8, pw * 0.25, ph * 0.25);
-  ctx.lineWidth = 3;
+  var cLen = Math.min(10, pw * 0.25, ph * 0.25);
+  ctx.lineWidth = 5;
   ctx.strokeStyle = color;
   ctx.beginPath();
   ctx.moveTo(px, py + cLen); ctx.lineTo(px, py); ctx.lineTo(px + cLen, py);
@@ -1440,7 +1440,7 @@ function render() {
 
     // Bounding box stroke using shape
     ctx.strokeStyle = color;
-    ctx.lineWidth = 2;
+    ctx.lineWidth = 3.5;
     strokeShape(ctx, px, py, pw, ph, shape);
 
     // Corner markers (only for rect shapes)
@@ -1476,7 +1476,7 @@ function render() {
       var pulse2 = 0.5 + 0.5 * Math.sin(frameCounter * 0.4);
       ctx.globalAlpha = 0.3 + cp * 0.5 * pulse2;
       ctx.strokeStyle = color;
-      ctx.lineWidth = 2 + cp * 3;
+      ctx.lineWidth = 3.5 + cp * 3;
       ctx.shadowColor = color;
       ctx.shadowBlur = cp * 15;
       strokeShape(ctx, px - 1, py - 1, pw + 2, ph + 2, shape);
@@ -1574,7 +1574,7 @@ function render() {
     ctx.save();
     ctx.globalAlpha = 0.15;
     ctx.strokeStyle = dp.color;
-    ctx.lineWidth = 1;
+    ctx.lineWidth = 2;
     ctx.setLineDash([4, 4]);
     strokeShape(ctx, dpx, dpy, dpw, dph, dshape);
     ctx.setLineDash([]);
