@@ -64,6 +64,8 @@ const DASH_MIN_MOVE = 0.05;       // dashes shorter than this are refunded
 const DASH_DAMAGE = 3;
 const DASH_DISPLAY_TICKS = 9;
 const UPGRADE_TICKS = 100;        // rectangle: 5s upgraded state
+const UPGRADE_SPEED_MULT = 1.15;  // rectangle moves 15% faster while upgraded
+const UPGRADE_SHOOT_COOLDOWN = 6; // and fires faster (0.3s instead of 0.4s)
 const TWIN_OFFSET = 0.7;          // cells between parallel bullets / beams
 const CRESCENT_SPEED = BULLET_SPEED * 1.3; // triangle: 30% faster than a bullet
 const CRESCENT_DAMAGE = 3;
@@ -654,7 +656,7 @@ wss.on('connection', (ws) => {
         const dy = msg.ty - cy;
         const dist = Math.sqrt(dx * dx + dy * dy);
         if (dist < 0.1) return; // click on self
-        p.shootCooldown = SHOOT_COOLDOWN;
+        p.shootCooldown = p.upgradeTicks > 0 ? UPGRADE_SHOOT_COOLDOWN : SHOOT_COOLDOWN;
 
         const ndx = dx / dist;
         const ndy = dy / dist;
@@ -810,6 +812,7 @@ function tickRoom(room) {
     if (p.dx !== 0 || p.dy !== 0) {
       let speedMult = p.charging ? CHARGE_SPEED_MULT : 1;
       if (p.shieldTicks > 0) speedMult *= SHIELD_SPEED_MULT;
+      if (p.upgradeTicks > 0) speedMult *= UPGRADE_SPEED_MULT;
       if (p.slowTicks > 0) speedMult *= SLOW_SPEED_MULT;
       const nx = p.x + p.dx * SPEED * speedMult;
       const ny = p.y + p.dy * SPEED * speedMult;
