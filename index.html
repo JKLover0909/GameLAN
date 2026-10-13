@@ -185,6 +185,22 @@
   .shape-btn.selected { border-color: #4a9eff; color: #4a9eff; }
   .shape-btn svg { width: 24px; height: 24px; }
 
+  /* Skill note under the shape picker */
+  #shapeInfo {
+    margin-top: 8px;
+    padding: 8px 10px;
+    background: #111;
+    border: 1px solid #222;
+    border-left: 2px solid #333;
+    font-size: 10px; color: #666;
+    line-height: 1.6;
+    min-height: 64px;
+  }
+  #shapeInfo.active { border-left-color: #4a9eff; }
+  #shapeInfo .info-title { color: #4a9eff; margin-bottom: 2px; }
+  #shapeInfo .info-cd { color: #555; margin-top: 2px; }
+  #shapeInfo .info-common { color: #444; margin-top: 4px; border-top: 1px solid #1c1c1c; padding-top: 4px; }
+
   /* Color picker */
   .color-options {
     display: flex; gap: 6px; flex-wrap: wrap;
@@ -322,6 +338,7 @@
             rectangle
           </button>
         </div>
+        <div id="shapeInfo">Select a shape to see its E tool.</div>
       </div>
 
       <div class="lobby-section">
@@ -742,10 +759,56 @@ function onColorSwatchClick(e) {
       for (var j = 0; j < all.length; j++) {
         all[j].classList.toggle('selected', all[j] === this);
       }
+      showShapeInfo(selectedShape);
       validateJoinBtn();
+    });
+    // Hover previews another shape; leaving restores the selected one
+    shapeBtns[i].addEventListener('mouseenter', function() {
+      showShapeInfo(this.getAttribute('data-shape'));
+    });
+    shapeBtns[i].addEventListener('mouseleave', function() {
+      showShapeInfo(selectedShape);
     });
   }
 })();
+
+var SHAPE_NOTES = {
+  circle: {
+    title: 'E · Shield',
+    lines: ['Outer ring for 3s: blocks normal and large shots.',
+            'A beam hit breaks it. When it ends or breaks: +2 HP.'],
+    cd: 'Cooldown 5s'
+  },
+  square: {
+    title: 'E · Dash',
+    lines: ['Dash toward the cursor (3× own size), 3 dmg to objects passed.',
+            'Works while charging the beam. A dash kill resets the cooldown.'],
+    cd: 'Cooldown 2s'
+  },
+  rectangle: {
+    title: 'E · Twin mode',
+    lines: ['For 5s every shot, large shot and beam fires twice in parallel.',
+            'Shown as a small inner rectangle.'],
+    cd: 'Cooldown 10s'
+  }
+};
+
+function showShapeInfo(shape) {
+  var el = document.getElementById('shapeInfo');
+  if (!el) return;
+  var note = SHAPE_NOTES[shape];
+  if (!note) {
+    el.classList.remove('active');
+    el.textContent = 'Select a shape to see its E tool.';
+    return;
+  }
+  el.classList.toggle('active', shape === selectedShape);
+  el.innerHTML =
+    '<div class="info-title">' + escHtml(note.title) + '</div>' +
+    note.lines.map(function(l) { return '<div>' + escHtml(l) + '</div>'; }).join('') +
+    '<div class="info-cd">' + escHtml(note.cd) + '</div>' +
+    '<div class="info-common">All shapes: click to shoot (every 3rd large), hold Space for beam.</div>';
+}
 
 // ─── Lobby: validate join button ─────────────────────────────
 function validateJoinBtn() {
