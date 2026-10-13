@@ -42,6 +42,7 @@ const MAX_PLAYERS = PALETTE.length;
 // Cooldowns for shield/upgrade start after the effect ends.
 const SKILL_COOLDOWN = { circle: 100, square: 40, rectangle: 200 };
 const SHIELD_TICKS = 60;          // circle: 3s shield
+const SHIELD_SPEED_MULT = 1.15;   // circle moves 15% faster while shielded
 const SHIELD_PADDING = 1.2;       // cells beyond the body radius
 const SHIELD_HEAL = 2;
 const SHIELD_BLAST_DAMAGE = 2;    // shield explodes when it expires or breaks
@@ -585,7 +586,8 @@ setInterval(() => {
       continue;
     }
     if (p.dx !== 0 || p.dy !== 0) {
-      const speedMult = p.charging ? CHARGE_SPEED_MULT : 1;
+      let speedMult = p.charging ? CHARGE_SPEED_MULT : 1;
+      if (p.shieldTicks > 0) speedMult *= SHIELD_SPEED_MULT;
       const nx = p.x + p.dx * SPEED * speedMult;
       const ny = p.y + p.dy * SPEED * speedMult;
       if (nx >= 0 && nx + p.w <= ARENA_W && !hitsWall(nx, p.y, p.w, p.h)) p.x = nx;
