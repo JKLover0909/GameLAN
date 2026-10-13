@@ -54,9 +54,11 @@
     width: 10px; height: 10px; border: 2px solid;
     background: transparent; flex-shrink: 0;
   }
-  .class-label { color: #777; flex: 1; }
+  .class-dot.circle { border-radius: 50%; }
+  .class-label { color: #777; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .class-label.me { color: #fff; }
   .class-label.dead { color: #444; text-decoration: line-through; }
+  .class-name { color: #555; font-size: 9px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 60px; }
   .class-kd { color: #555; font-size: 10px; white-space: nowrap; }
 
   .hp-bar-wrap {
@@ -137,6 +139,135 @@
   #overlay.hidden { display: none; }
   #overlayCountdown { color: #888; margin-top: 8px; font-size: 12px; }
 
+  /* ── Lobby ── */
+  #lobbyPanel {
+    background: #141414;
+    border: 1px solid #2a2a2a;
+    padding: 24px 28px;
+    width: 340px;
+    max-width: 90vw;
+  }
+  #lobbyPanel h3 {
+    font-size: 11px;
+    color: #666;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    margin-bottom: 16px;
+  }
+  .lobby-section {
+    margin-bottom: 14px;
+  }
+  .lobby-section label {
+    display: block;
+    font-size: 10px;
+    color: #555;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 6px;
+  }
+
+  /* Shape picker */
+  .shape-options {
+    display: flex; gap: 8px;
+  }
+  .shape-btn {
+    width: 60px; height: 50px;
+    background: #1a1a1a;
+    border: 1px solid #333;
+    cursor: pointer;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    gap: 4px;
+    font-size: 9px; color: #555;
+    font-family: inherit;
+  }
+  .shape-btn:hover { border-color: #555; }
+  .shape-btn.selected { border-color: #4a9eff; color: #4a9eff; }
+  .shape-btn svg { width: 24px; height: 24px; }
+
+  /* Color picker */
+  .color-options {
+    display: flex; gap: 6px; flex-wrap: wrap;
+  }
+  .color-swatch {
+    width: 28px; height: 28px;
+    border: 2px solid transparent;
+    cursor: pointer;
+    background: transparent;
+    position: relative;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .color-swatch .swatch-inner {
+    width: 20px; height: 20px;
+    border: 2px solid currentColor;
+    background: transparent;
+  }
+  .color-swatch:hover { border-color: #555; }
+  .color-swatch.selected { border-color: currentColor; }
+  .color-swatch.taken {
+    opacity: 0.2;
+    cursor: not-allowed;
+  }
+  .color-swatch.taken .swatch-inner::after {
+    content: '×';
+    position: absolute;
+    inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 14px; color: #666;
+  }
+  .color-swatch-label {
+    font-size: 8px;
+    color: #444;
+    text-align: center;
+    margin-top: 2px;
+  }
+
+  /* Name input */
+  #nameInput {
+    background: #1a1a1a;
+    border: 1px solid #333;
+    color: #ccc;
+    font-family: inherit;
+    font-size: 12px;
+    padding: 6px 10px;
+    width: 100%;
+    outline: none;
+  }
+  #nameInput:focus { border-color: #4a9eff; }
+  #nameInput::placeholder { color: #444; }
+
+  /* Join button */
+  #joinBtn {
+    display: block;
+    width: 100%;
+    padding: 8px;
+    margin-top: 14px;
+    background: #1a1a1a;
+    border: 1px solid #333;
+    color: #555;
+    font-family: inherit;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    cursor: pointer;
+  }
+  #joinBtn:hover:not(:disabled) { border-color: #4a9eff; color: #4a9eff; }
+  #joinBtn:disabled { opacity: 0.3; cursor: not-allowed; }
+
+  #lobbyError {
+    color: #884444;
+    font-size: 10px;
+    margin-top: 8px;
+    min-height: 14px;
+  }
+
+  #lobbyFull {
+    color: #666;
+    font-size: 10px;
+    margin-top: 6px;
+    text-align: center;
+  }
+
   #deathBanner {
     display: none;
     padding: 6px 14px;
@@ -152,7 +283,47 @@
 </head>
 <body>
 
-<div id="overlay"><div><div id="overlayMessage">Loading detection results...</div><div id="overlayCountdown"></div></div></div>
+<div id="overlay">
+  <div>
+    <div id="overlayMessage">Loading detection results...</div>
+    <div id="overlayCountdown"></div>
+    <div id="lobbyPanel" style="display:none;">
+      <h3>Configure Detection Class</h3>
+
+      <div class="lobby-section">
+        <label>Shape</label>
+        <div class="shape-options" id="shapeOptions">
+          <button class="shape-btn" data-shape="circle" type="button">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/></svg>
+            circle
+          </button>
+          <button class="shape-btn" data-shape="square" type="button">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16"/></svg>
+            square
+          </button>
+          <button class="shape-btn" data-shape="rectangle" type="button">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="6" width="20" height="12"/></svg>
+            rectangle
+          </button>
+        </div>
+      </div>
+
+      <div class="lobby-section">
+        <label>Color</label>
+        <div class="color-options" id="colorOptions"></div>
+      </div>
+
+      <div class="lobby-section">
+        <label>Name (1–20 characters)</label>
+        <input type="text" id="nameInput" placeholder="Enter annotation label..." maxlength="20" autocomplete="off" spellcheck="false">
+      </div>
+
+      <button id="joinBtn" type="button" disabled>Start Detection</button>
+      <div id="lobbyError"></div>
+      <div id="lobbyFull"></div>
+    </div>
+  </div>
+</div>
 
 <div id="sidebar">
   <div id="sidebar-header">
@@ -223,6 +394,10 @@
 </div>
 
 <script>
+/* ═══════════════════════════════════════════════════════════════
+   Annotation Review — Bounding Box Arena Client
+   ═══════════════════════════════════════════════════════════════ */
+
 const canvas = document.getElementById('canvas');
 const ctx = canvas.getContext('2d');
 let myId = null;
@@ -230,34 +405,90 @@ let arenaW = 160, arenaH = 90, cellSize = 15;
 let players = [];
 let bullets = [];
 let gameBeams = [];
+let palette = []; // [{color, name}] from server
 let ws;
 let keysDown = new Set();
 let frameCounter = 0;
-let mouseX = 80, mouseY = 45;  // default center
+let mouseX = 80, mouseY = 45;
 let myShotCount = 0;
 let isCharging = false;
+
+// Client state machine: 'connecting' | 'lobby' | 'joining' | 'alive' | 'dead'
+let clientState = 'connecting';
+
+// Lobby selections
+let selectedShape = null;
+let selectedColor = null;
+let lobbyBuilt = false; // prevent rebuilding color swatches every tick
 
 // ─── Background image ────────────────────────────────────────
 let bgImage = null;
 let bgLoaded = false;
 const bgImg = new Image();
-bgImg.onload = () => { bgImage = bgImg; bgLoaded = true; render(); };
+bgImg.onload = function() { bgImage = bgImg; bgLoaded = true; render(); };
 bgImg.src = '/image.png';
+
+// ─── Helpers ─────────────────────────────────────────────────
+function escHtml(s) {
+  var d = document.createElement('div');
+  d.textContent = s;
+  return d.innerHTML;
+}
+
+function escAttr(s) {
+  return s.replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/'/g,'&#39;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// Determine which colors are taken by admitted/joining/dead players
+function takenColors() {
+  var taken = new Set();
+  for (var i = 0; i < players.length; i++) {
+    taken.add(players[i].color);
+  }
+  return taken;
+}
+
+// Am I an admitted player? (present in the players list)
+function getMe() {
+  if (myId == null) return null;
+  for (var i = 0; i < players.length; i++) {
+    if (players[i].id === myId) return players[i];
+  }
+  return null;
+}
+
+// Can I do gameplay actions? Only when alive and not joining
+function canPlay() {
+  if (clientState !== 'alive') return false;
+  var me = getMe();
+  return me && !me.dead && !me.joining;
+}
+
+// ─── Reset input state ──────────────────────────────────────
+function resetInputState() {
+  keysDown.clear();
+  if (isCharging) {
+    isCharging = false;
+  }
+  if (ws && ws.readyState === 1) {
+    ws.send(JSON.stringify({ type: 'input_reset' }));
+  }
+}
 
 // ─── WebSocket ───────────────────────────────────────────────
 function connect() {
-  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-  ws = new WebSocket(`${proto}://${location.host}`);
+  var proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  ws = new WebSocket(proto + '://' + location.host);
 
-  ws.onopen = () => {
-    document.getElementById('overlay').classList.remove('hidden');
-    document.getElementById('overlayMessage').textContent = 'Preparing detection results...';
+  ws.onopen = function() {
+    resetInputState();
     resizeCanvas();
     render();
   };
 
-  ws.onmessage = (e) => {
-    const msg = JSON.parse(e.data);
+  ws.onmessage = function(e) {
+    var msg = JSON.parse(e.data);
+
     if (msg.type === 'welcome') {
       myId = msg.id;
       arenaW = msg.arena.w;
@@ -266,11 +497,15 @@ function connect() {
       players = msg.players;
       bullets = msg.bullets || [];
       gameBeams = msg.beams || [];
+      if (msg.palette) palette = msg.palette;
       resizeCanvas();
-      render();
+      determineClientState();
+      updateOverlay();
       updateUI();
-      updateJoinOverlay();
+      render();
+      return;
     }
+
     if (msg.type === 'state') {
       if (msg.arena) {
         arenaW = msg.arena.w;
@@ -280,65 +515,275 @@ function connect() {
       players = msg.players;
       bullets = msg.bullets || [];
       gameBeams = msg.beams || [];
+      if (msg.palette) palette = msg.palette;
+      determineClientState();
+      updateOverlay();
       updateUI();
-      updateJoinOverlay();
       render();
+      return;
+    }
+
+    if (msg.type === 'join_error') {
+      var errEl = document.getElementById('lobbyError');
+      if (errEl) errEl.textContent = msg.message || 'Failed to join.';
+      // Re-enable join button
+      var btn = document.getElementById('joinBtn');
+      if (btn) btn.disabled = false;
+      return;
     }
   };
 
-  ws.onclose = () => {
-    document.getElementById('overlay').classList.remove('hidden');
-    document.getElementById('overlayMessage').textContent = 'Reconnecting to annotation server...';
-    document.getElementById('overlayCountdown').textContent = '';
+  ws.onclose = function() {
+    clientState = 'connecting';
+    myId = null;
+    players = [];
+    bullets = [];
+    gameBeams = [];
+    palette = [];
+    lobbyBuilt = false;
+    resetInputState();
+    updateOverlay();
     setTimeout(connect, 1500);
   };
 }
 
-function updateJoinOverlay() {
-  const me = players.find(p => p.id === myId);
-  const overlay = document.getElementById('overlay');
-  const message = document.getElementById('overlayMessage');
-  const countdown = document.getElementById('overlayCountdown');
-  if (!me || me.joining) {
+// ─── Client state machine ────────────────────────────────────
+function determineClientState() {
+  var prev = clientState;
+  var me = getMe();
+  if (!me) {
+    // Not in players list = lobby
+    clientState = 'lobby';
+  } else if (me.joining) {
+    clientState = 'joining';
+  } else if (me.dead) {
+    clientState = 'dead';
+  } else {
+    clientState = 'alive';
+  }
+  // Leaving play (e.g. dying) drops held keys so nothing sticks after respawn
+  if (prev === 'alive' && clientState !== 'alive') resetInputState();
+}
+
+// ─── Overlay management ──────────────────────────────────────
+function updateOverlay() {
+  var overlay = document.getElementById('overlay');
+  var message = document.getElementById('overlayMessage');
+  var countdown = document.getElementById('overlayCountdown');
+  var lobbyPanel = document.getElementById('lobbyPanel');
+
+  if (clientState === 'connecting') {
     overlay.classList.remove('hidden');
-    message.textContent = 'Entering arena...';
-    countdown.textContent = me ? `${Math.ceil(me.joinTicks / 20)} seconds` : 'Waiting for server...';
+    lobbyPanel.style.display = 'none';
+    message.textContent = 'Reconnecting to annotation server...';
+    countdown.textContent = '';
     return;
   }
+
+  if (clientState === 'lobby') {
+    overlay.classList.remove('hidden');
+    message.textContent = '';
+    countdown.textContent = '';
+    lobbyPanel.style.display = 'block';
+    buildLobbyColors();
+    validateJoinBtn();
+    return;
+  }
+
+  if (clientState === 'joining') {
+    overlay.classList.remove('hidden');
+    lobbyPanel.style.display = 'none';
+    message.textContent = 'Entering arena...';
+    var me = getMe();
+    countdown.textContent = me ? Math.ceil(me.joinTicks / 20) + ' seconds' : '';
+    return;
+  }
+
+  // alive or dead — hide overlay
   overlay.classList.add('hidden');
+  lobbyPanel.style.display = 'none';
   countdown.textContent = '';
 }
 
+// ─── Lobby: build color swatches ─────────────────────────────
+function buildLobbyColors() {
+  var container = document.getElementById('colorOptions');
+  if (!container) return;
+
+  var taken = takenColors();
+
+  // Only rebuild DOM when palette changes or first time
+  if (!lobbyBuilt || container.childElementCount !== palette.length) {
+    lobbyBuilt = true;
+    container.innerHTML = '';
+    for (var i = 0; i < palette.length; i++) {
+      var p = palette[i];
+      var wrap = document.createElement('div');
+      wrap.style.display = 'flex';
+      wrap.style.flexDirection = 'column';
+      wrap.style.alignItems = 'center';
+
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'color-swatch';
+      btn.style.color = p.color;
+      btn.setAttribute('data-color', p.color);
+      btn.setAttribute('data-color-name', p.name);
+
+      var inner = document.createElement('div');
+      inner.className = 'swatch-inner';
+      btn.appendChild(inner);
+
+      var lbl = document.createElement('div');
+      lbl.className = 'color-swatch-label';
+      lbl.textContent = p.name;
+
+      wrap.appendChild(btn);
+      wrap.appendChild(lbl);
+      container.appendChild(wrap);
+    }
+
+    // Attach click handlers
+    var swatches = container.querySelectorAll('.color-swatch');
+    for (var j = 0; j < swatches.length; j++) {
+      swatches[j].addEventListener('click', onColorSwatchClick);
+    }
+  }
+
+  // Update taken/selected state without rebuilding DOM
+  var swatches = container.querySelectorAll('.color-swatch');
+  for (var k = 0; k < swatches.length; k++) {
+    var sw = swatches[k];
+    var c = sw.getAttribute('data-color');
+    var isTaken = taken.has(c);
+    sw.classList.toggle('taken', isTaken);
+    sw.classList.toggle('selected', c === selectedColor && !isTaken);
+    // If our selected color got taken, deselect it
+    if (c === selectedColor && isTaken) {
+      selectedColor = null;
+    }
+  }
+
+  // Full lobby notice
+  var fullEl = document.getElementById('lobbyFull');
+  if (fullEl) {
+    if (palette.length > 0 && taken.size >= palette.length) {
+      fullEl.textContent = 'All detection slots occupied — waiting for availability...';
+    } else {
+      fullEl.textContent = '';
+    }
+  }
+
+  validateJoinBtn();
+}
+
+function onColorSwatchClick(e) {
+  var btn = e.currentTarget;
+  if (btn.classList.contains('taken')) return;
+  selectedColor = btn.getAttribute('data-color');
+  buildLobbyColors(); // refresh selection state
+  validateJoinBtn();
+}
+
+// ─── Lobby: shape selection ──────────────────────────────────
+(function() {
+  var shapeBtns = document.querySelectorAll('#shapeOptions .shape-btn');
+  for (var i = 0; i < shapeBtns.length; i++) {
+    shapeBtns[i].addEventListener('click', function() {
+      selectedShape = this.getAttribute('data-shape');
+      var all = document.querySelectorAll('#shapeOptions .shape-btn');
+      for (var j = 0; j < all.length; j++) {
+        all[j].classList.toggle('selected', all[j] === this);
+      }
+      validateJoinBtn();
+    });
+  }
+})();
+
+// ─── Lobby: validate join button ─────────────────────────────
+function validateJoinBtn() {
+  var btn = document.getElementById('joinBtn');
+  if (!btn) return;
+  var nameInput = document.getElementById('nameInput');
+  var name = nameInput ? nameInput.value.trim() : '';
+  var valid = selectedShape && selectedColor && name.length >= 1 && name.length <= 20;
+  btn.disabled = !valid;
+}
+
+// Name input validation
+(function() {
+  var nameInput = document.getElementById('nameInput');
+  if (nameInput) {
+    nameInput.addEventListener('input', validateJoinBtn);
+  }
+})();
+
+// ─── Lobby: join button ──────────────────────────────────────
+document.getElementById('joinBtn').addEventListener('click', function() {
+  if (this.disabled) return;
+  var nameInput = document.getElementById('nameInput');
+  var name = nameInput ? nameInput.value.trim() : '';
+  if (!selectedShape || !selectedColor || name.length < 1 || name.length > 20) return;
+  if (!ws || ws.readyState !== 1) return;
+
+  // Clear error
+  var errEl = document.getElementById('lobbyError');
+  if (errEl) errEl.textContent = '';
+
+  // Disable button to prevent double-submit
+  this.disabled = true;
+
+  ws.send(JSON.stringify({
+    type: 'join',
+    shape: selectedShape,
+    color: selectedColor,
+    name: name
+  }));
+});
+
+// Prevent Enter in name input from doing anything weird
+document.getElementById('nameInput').addEventListener('keydown', function(e) {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    var btn = document.getElementById('joinBtn');
+    if (btn && !btn.disabled) btn.click();
+  }
+  // Prevent Space in lobby from triggering charge
+  if (e.key === ' ') {
+    e.stopPropagation();
+  }
+});
+
 // ─── Canvas sizing ───────────────────────────────────────────
 function resizeCanvas() {
-  const container = document.getElementById('canvasWrap');
-  const maxW = container.clientWidth;
-  const maxH = container.clientHeight;
-  if (maxW < 10 || maxH < 10) return; // container not ready
+  var container = document.getElementById('canvasWrap');
+  var maxW = container.clientWidth;
+  var maxH = container.clientHeight;
+  if (maxW < 10 || maxH < 10) return;
 
-  const gameW = arenaW * cellSize;  // 160*15 = 2400
-  const gameH = arenaH * cellSize;  // 90*15  = 1350
-  const scale = Math.min(maxW / gameW, maxH / gameH);
+  var gameW = arenaW * cellSize;
+  var gameH = arenaH * cellSize;
+  var scale = Math.min(maxW / gameW, maxH / gameH);
 
   canvas.width = gameW;
   canvas.height = gameH;
   canvas.style.width = Math.floor(gameW * scale) + 'px';
   canvas.style.height = Math.floor(gameH * scale) + 'px';
 }
-window.addEventListener('resize', () => { resizeCanvas(); render(); });
+window.addEventListener('resize', function() { resizeCanvas(); render(); });
 
 // ─── Mouse tracking ─────────────────────────────────────────
-document.addEventListener('mousemove', (e) => {
-  const rect = canvas.getBoundingClientRect();
+document.addEventListener('mousemove', function(e) {
+  var rect = canvas.getBoundingClientRect();
   if (rect.width === 0 || rect.height === 0) return;
-  const sx = canvas.width / rect.width;
-  const sy = canvas.height / rect.height;
-  const px = (e.clientX - rect.left) * sx;
-  const py = (e.clientY - rect.top) * sy;
+  var sx = canvas.width / rect.width;
+  var sy = canvas.height / rect.height;
+  var px = (e.clientX - rect.left) * sx;
+  var py = (e.clientY - rect.top) * sy;
   mouseX = px / cellSize;
   mouseY = py / cellSize;
   document.getElementById('coordDisplay').textContent =
-    `x: ${Math.floor(px)}  y: ${Math.floor(py)}`;
+    'x: ' + Math.floor(px) + '  y: ' + Math.floor(py);
 
   // Update charge aim direction while charging
   if (isCharging && ws && ws.readyState === 1) {
@@ -347,9 +792,56 @@ document.addEventListener('mousemove', (e) => {
 });
 
 // ─── Rendering ───────────────────────────────────────────────
+
+// Get clip path for a player's shape on the canvas context
+function applyShapeClip(ctx, px, py, pw, ph, shape) {
+  ctx.beginPath();
+  if (shape === 'circle') {
+    var rx = pw / 2;
+    var ry = ph / 2;
+    ctx.ellipse(px + rx, py + ry, rx, ry, 0, 0, Math.PI * 2);
+  } else {
+    // square or rectangle — just rect
+    ctx.rect(px, py, pw, ph);
+  }
+  ctx.closePath();
+}
+
+// Draw the shape outline (stroke)
+function strokeShape(ctx, px, py, pw, ph, shape) {
+  if (shape === 'circle') {
+    var rx = pw / 2;
+    var ry = ph / 2;
+    ctx.beginPath();
+    ctx.ellipse(px + rx, py + ry, rx, ry, 0, 0, Math.PI * 2);
+    ctx.stroke();
+  } else {
+    ctx.strokeRect(px, py, pw, ph);
+  }
+}
+
+// Draw corner markers for rect shapes
+function drawCornerMarkers(ctx, px, py, pw, ph, color) {
+  var cLen = Math.min(8, pw * 0.25, ph * 0.25);
+  ctx.lineWidth = 3;
+  ctx.strokeStyle = color;
+  ctx.beginPath();
+  ctx.moveTo(px, py + cLen); ctx.lineTo(px, py); ctx.lineTo(px + cLen, py);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(px + pw - cLen, py); ctx.lineTo(px + pw, py); ctx.lineTo(px + pw, py + cLen);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(px, py + ph - cLen); ctx.lineTo(px, py + ph); ctx.lineTo(px + cLen, py + ph);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(px + pw - cLen, py + ph); ctx.lineTo(px + pw, py + ph); ctx.lineTo(px + pw, py + ph - cLen);
+  ctx.stroke();
+}
+
 function render() {
-  const W = canvas.width;
-  const H = canvas.height;
+  var W = canvas.width;
+  var H = canvas.height;
   if (W === 0 || H === 0) return;
 
   frameCounter++;
@@ -364,17 +856,18 @@ function render() {
   }
 
   // ── Draw bullets ──
-  for (const b of bullets) {
-    const bpx = b.x * cellSize;
-    const bpy = b.y * cellSize;
-    const bsz = b.size * cellSize;
+  for (var bi = 0; bi < bullets.length; bi++) {
+    var b = bullets[bi];
+    var bpx = b.x * cellSize;
+    var bpy = b.y * cellSize;
+    var bsz = b.size * cellSize;
 
     ctx.strokeStyle = b.color;
     ctx.lineWidth = b.big ? 2.5 : 1.5;
     ctx.strokeRect(bpx - bsz / 2, bpy - bsz / 2, bsz, bsz);
 
     if (b.big) {
-      const r = bsz * 0.35;
+      var r = bsz * 0.35;
       ctx.beginPath();
       ctx.moveTo(bpx - r, bpy); ctx.lineTo(bpx + r, bpy);
       ctx.moveTo(bpx, bpy - r); ctx.lineTo(bpx, bpy + r);
@@ -383,80 +876,68 @@ function render() {
   }
 
   // ── Draw alive players ──
-  for (const p of players) {
+  for (var pi = 0; pi < players.length; pi++) {
+    var p = players[pi];
     if (p.dead) continue;
 
-    const px = p.x * cellSize;
-    const py = p.y * cellSize;
-    const pw = (p.w || 3) * cellSize;
-    const ph = (p.h || 3) * cellSize;
-    const color = p.color;
+    var px = p.x * cellSize;
+    var py = p.y * cellSize;
+    var pw = (p.w || 3) * cellSize;
+    var ph = (p.h || 3) * cellSize;
+    var color = p.color;
+    var shape = p.shape || 'square';
 
-    // Bounding box stroke
+    // Bounding box stroke using shape
     ctx.strokeStyle = color;
     ctx.lineWidth = 2;
-    ctx.strokeRect(px, py, pw, ph);
+    strokeShape(ctx, px, py, pw, ph, shape);
 
-    // Corner markers
-    const cLen = Math.min(8, pw * 0.25, ph * 0.25);
-    ctx.lineWidth = 3;
-    ctx.strokeStyle = color;
-    ctx.beginPath();
-    ctx.moveTo(px, py + cLen); ctx.lineTo(px, py); ctx.lineTo(px + cLen, py);
-    ctx.stroke();
-    ctx.beginPath();
-    ctx.moveTo(px + pw - cLen, py); ctx.lineTo(px + pw, py); ctx.lineTo(px + pw, py + cLen);
-    ctx.stroke();
-    ctx.beginPath();
-    ctx.moveTo(px, py + ph - cLen); ctx.lineTo(px, py + ph); ctx.lineTo(px + cLen, py + ph);
-    ctx.stroke();
-    ctx.beginPath();
-    ctx.moveTo(px + pw - cLen, py + ph); ctx.lineTo(px + pw, py + ph); ctx.lineTo(px + pw, py + ph - cLen);
-    ctx.stroke();
-
-    // Own box: subtle fill
-    if (p.id === myId && !p.charging) {
-      ctx.save();
-      ctx.globalAlpha = 0.08;
-      ctx.fillStyle = color;
-      ctx.fillRect(px + 1, py + 1, pw - 2, ph - 2);
-      ctx.restore();
+    // Corner markers (only for rect shapes)
+    if (shape !== 'circle') {
+      drawCornerMarkers(ctx, px, py, pw, ph, color);
     }
 
-    // ── Charge fill effect ──
+    // ── Charge fill effect ── uses shape clip
     if (p.chargeProgress > 0) {
       ctx.save();
-      const cp = p.chargeProgress; // 0 → 1
-      // Fill from bottom to top, opacity ramps up
-      const fillH = ph * cp;
-      ctx.globalAlpha = 0.15 + cp * 0.55; // 0.15 → 0.70
-      ctx.fillStyle = color;
-      ctx.fillRect(px + 1, py + ph - fillH, pw - 2, fillH);
+      var cp = p.chargeProgress; // 0 → 1
+      // Clip to player shape
+      applyShapeClip(ctx, px, py, pw, ph, shape);
+      ctx.clip();
 
-      // Pulsing glow border when charging
-      const pulse = 0.5 + 0.5 * Math.sin(frameCounter * 0.4);
-      ctx.globalAlpha = 0.3 + cp * 0.5 * pulse;
+      // Fill from bottom to top, opacity ramps up
+      var fillH = ph * cp;
+      ctx.globalAlpha = 0.15 + cp * 0.55;
+      ctx.fillStyle = color;
+      ctx.fillRect(px, py + ph - fillH, pw, fillH);
+
+      // Fully charged indicator — bright flash
+      if (cp >= 1) {
+        var pulse = 0.5 + 0.5 * Math.sin(frameCounter * 0.4);
+        ctx.globalAlpha = 0.3 + 0.2 * pulse;
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(px, py, pw, ph);
+      }
+      ctx.restore();
+
+      // Pulsing glow border when charging (outside clip)
+      ctx.save();
+      var pulse2 = 0.5 + 0.5 * Math.sin(frameCounter * 0.4);
+      ctx.globalAlpha = 0.3 + cp * 0.5 * pulse2;
       ctx.strokeStyle = color;
       ctx.lineWidth = 2 + cp * 3;
       ctx.shadowColor = color;
       ctx.shadowBlur = cp * 15;
-      ctx.strokeRect(px - 1, py - 1, pw + 2, ph + 2);
+      strokeShape(ctx, px - 1, py - 1, pw + 2, ph + 2, shape);
       ctx.shadowBlur = 0;
-
-      // Fully charged indicator — bright flash
-      if (cp >= 1) {
-        ctx.globalAlpha = 0.3 + 0.2 * pulse;
-        ctx.fillStyle = '#ffffff';
-        ctx.fillRect(px + 1, py + 1, pw - 2, ph - 2);
-      }
       ctx.restore();
     }
 
     // ── HP bar above box ──
-    const labelH = 12;
-    const hpBarW = pw;
-    const hpRatio = Math.max(0, p.hp / p.maxHp);
-    const hpColor = hpRatio > 0.6 ? '#00ff00' : hpRatio > 0.3 ? '#ffaa00' : '#ff3333';
+    var labelH = 12;
+    var hpBarW = pw;
+    var hpRatio = Math.max(0, p.hp / p.maxHp);
+    var hpColor = hpRatio > 0.6 ? '#00ff00' : hpRatio > 0.3 ? '#ffaa00' : '#ff3333';
 
     // HP background
     ctx.save();
@@ -481,47 +962,60 @@ function render() {
     ctx.textAlign = 'center';
     ctx.fillText('HP ' + p.hp + '/' + p.maxHp, px + pw / 2, py - labelH / 2 - 2);
 
-    // Class label inside box (small, top-left)
+    // Fake class label inside box (small, top-left) — annotation appearance
     ctx.fillStyle = color;
     ctx.font = '8px Consolas, Monaco, monospace';
     ctx.textAlign = 'left';
     ctx.textBaseline = 'top';
     ctx.fillText(p.label + ' ' + p.conf, px + 3, py + 3);
+
+    // User name — below box, centered, separate from fake label
+    if (p.name) {
+      ctx.fillStyle = color;
+      ctx.globalAlpha = 0.7;
+      ctx.font = '10px Consolas, Monaco, monospace';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'top';
+      ctx.fillText(p.name, px + pw / 2, py + ph + 3);
+      ctx.globalAlpha = 1.0;
+    }
   }
 
   // ── Draw dead players ──
-  for (const p of players) {
-    if (!p.dead) continue;
-    const px = p.x * cellSize;
-    const py = p.y * cellSize;
-    const pw = (p.w || 3) * cellSize;
-    const ph = (p.h || 3) * cellSize;
+  for (var di = 0; di < players.length; di++) {
+    var dp = players[di];
+    if (!dp.dead) continue;
+    var dpx = dp.x * cellSize;
+    var dpy = dp.y * cellSize;
+    var dpw = (dp.w || 3) * cellSize;
+    var dph = (dp.h || 3) * cellSize;
+    var dshape = dp.shape || 'square';
 
     ctx.save();
     ctx.globalAlpha = 0.15;
-    ctx.strokeStyle = p.color;
+    ctx.strokeStyle = dp.color;
     ctx.lineWidth = 1;
     ctx.setLineDash([4, 4]);
-    ctx.strokeRect(px, py, pw, ph);
+    strokeShape(ctx, dpx, dpy, dpw, dph, dshape);
     ctx.setLineDash([]);
     ctx.fillStyle = '#ff3333';
     ctx.font = '9px Consolas, monospace';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText('LOST', px + pw / 2, py + ph / 2);
+    ctx.fillText('LOST', dpx + dpw / 2, dpy + dph / 2);
     ctx.restore();
   }
 
   // ── Draw energy beams ──
-  for (const beam of gameBeams) {
-    const sx = beam.x * cellSize;
-    const sy = beam.y * cellSize;
-    const fade = beam.life / beam.maxLife; // 1 → 0 as beam fades
+  for (var bei = 0; bei < gameBeams.length; bei++) {
+    var beam = gameBeams[bei];
+    var bsx = beam.x * cellSize;
+    var bsy = beam.y * cellSize;
+    var fade = beam.life / beam.maxLife;
 
-    // Calculate beam endpoint (edge of arena)
-    const maxLen = Math.sqrt((arenaW * cellSize) ** 2 + (arenaH * cellSize) ** 2);
-    const ex = sx + beam.dx * maxLen;
-    const ey = sy + beam.dy * maxLen;
+    var maxLen = Math.sqrt(Math.pow(arenaW * cellSize, 2) + Math.pow(arenaH * cellSize, 2));
+    var bex = bsx + beam.dx * maxLen;
+    var bey = bsy + beam.dy * maxLen;
 
     ctx.save();
 
@@ -532,8 +1026,8 @@ function render() {
     ctx.shadowColor = beam.color;
     ctx.shadowBlur = 25 * fade;
     ctx.beginPath();
-    ctx.moveTo(sx, sy);
-    ctx.lineTo(ex, ey);
+    ctx.moveTo(bsx, bsy);
+    ctx.lineTo(bex, bey);
     ctx.stroke();
 
     // Middle bright layer
@@ -541,8 +1035,8 @@ function render() {
     ctx.lineWidth = 8 * fade;
     ctx.shadowBlur = 15 * fade;
     ctx.beginPath();
-    ctx.moveTo(sx, sy);
-    ctx.lineTo(ex, ey);
+    ctx.moveTo(bsx, bsy);
+    ctx.lineTo(bex, bey);
     ctx.stroke();
 
     // Core white-hot center
@@ -552,8 +1046,8 @@ function render() {
     ctx.shadowColor = '#ffffff';
     ctx.shadowBlur = 10 * fade;
     ctx.beginPath();
-    ctx.moveTo(sx, sy);
-    ctx.lineTo(ex, ey);
+    ctx.moveTo(bsx, bsy);
+    ctx.lineTo(bex, bey);
     ctx.stroke();
 
     ctx.restore();
@@ -561,34 +1055,34 @@ function render() {
 
   // ── Draw aim line while charging (own player only) ──
   if (isCharging) {
-    const me = players.find(p => p.id === myId);
+    var me = getMe();
     if (me && !me.dead) {
-      const cx = (me.x + me.w / 2) * cellSize;
-      const cy = (me.y + me.h / 2) * cellSize;
-      const tx = mouseX * cellSize;
-      const ty = mouseY * cellSize;
-      const ddx = tx - cx;
-      const ddy = ty - cy;
-      const dist = Math.sqrt(ddx * ddx + ddy * ddy);
+      var cx = (me.x + me.w / 2) * cellSize;
+      var cy = (me.y + me.h / 2) * cellSize;
+      var tx = mouseX * cellSize;
+      var ty = mouseY * cellSize;
+      var ddx = tx - cx;
+      var ddy = ty - cy;
+      var dist = Math.sqrt(ddx * ddx + ddy * ddy);
       if (dist > 1) {
-        const ndx = ddx / dist;
-        const ndy = ddy / dist;
-        const maxLen = Math.sqrt((arenaW * cellSize) ** 2 + (arenaH * cellSize) ** 2);
-        const ex = cx + ndx * maxLen;
-        const ey = cy + ndy * maxLen;
+        var ndx = ddx / dist;
+        var ndy = ddy / dist;
+        var maxL = Math.sqrt(Math.pow(arenaW * cellSize, 2) + Math.pow(arenaH * cellSize, 2));
+        var aex = cx + ndx * maxL;
+        var aey = cy + ndy * maxL;
 
-        const cp = me.chargeProgress || 0;
+        var acp = me.chargeProgress || 0;
 
         ctx.save();
         ctx.setLineDash([6, 8]);
-        ctx.globalAlpha = 0.2 + cp * 0.4;
+        ctx.globalAlpha = 0.2 + acp * 0.4;
         ctx.strokeStyle = me.color;
-        ctx.lineWidth = 1 + cp * 2;
+        ctx.lineWidth = 1 + acp * 2;
         ctx.shadowColor = me.color;
-        ctx.shadowBlur = cp * 10;
+        ctx.shadowBlur = acp * 10;
         ctx.beginPath();
         ctx.moveTo(cx, cy);
-        ctx.lineTo(ex, ey);
+        ctx.lineTo(aex, aey);
         ctx.stroke();
         ctx.setLineDash([]);
         ctx.restore();
@@ -601,55 +1095,59 @@ function render() {
 
 // ─── UI ─────────────────────────────────────────────────────
 function updateUI() {
-  const me = players.find(p => p.id === myId);
+  var me = getMe();
 
-  const deathBanner = document.getElementById('deathBanner');
+  var deathBanner = document.getElementById('deathBanner');
   if (deathBanner) deathBanner.classList.toggle('show', Boolean(me && me.dead));
-  if (deathBanner) {
-    deathBanner.textContent = me && me.dead
-      ? 'object lost — re-detecting...'
-      : '';
-  }
 
-  const el = document.getElementById('playerList');
+  var el = document.getElementById('playerList');
   document.getElementById('playerCount').textContent = players.length + ' objects';
 
-  const sorted = [...players].sort((a, b) => {
+  var sorted = players.slice().sort(function(a, b) {
     if (a.dead !== b.dead) return a.dead ? 1 : -1;
     return (b.kills || 0) - (a.kills || 0);
   });
 
-  el.innerHTML = sorted.map(p => {
-    const hpPct = Math.max(0, (p.hp / p.maxHp) * 100);
-    const hpColor = hpPct > 60 ? '#00ff00' : hpPct > 30 ? '#ffaa00' : '#ff3333';
-    const isMe = p.id === myId;
+  el.innerHTML = sorted.map(function(p) {
+    var hpPct = Math.max(0, (p.hp / p.maxHp) * 100);
+    var hpColor = hpPct > 60 ? '#00ff00' : hpPct > 30 ? '#ffaa00' : '#ff3333';
+    var isMe = p.id === myId;
+    var dotClass = 'class-dot' + (p.shape === 'circle' ? ' circle' : '');
+    var safeName = p.name ? escHtml(p.name) : '';
+    var safeLabel = escHtml(p.label);
     return '<div class="class-row">' +
-      '<div class="class-dot" style="border-color:' + p.color + (p.dead ? ';opacity:0.3' : '') + '"></div>' +
+      '<div class="' + dotClass + '" style="border-color:' + escAttr(p.color) + (p.dead ? ';opacity:0.3' : '') + '"></div>' +
       '<span class="class-label ' + (isMe ? 'me' : '') + ' ' + (p.dead ? 'dead' : '') + '">' +
-        escHtml(p.label) + (isMe ? ' ●' : '') + '</span>' +
+        safeLabel + (isMe ? ' ●' : '') + '</span>' +
+      (safeName ? '<span class="class-name" title="' + escAttr(p.name) + '">' + safeName + '</span>' : '') +
       '<div class="hp-bar-wrap"><div class="hp-bar-fill" style="width:' + hpPct + '%;background:' + (p.dead ? '#333' : hpColor) + '"></div></div>' +
       '<span class="class-kd">' + (p.kills || 0) + '/' + (p.deaths || 0) + '</span>' +
     '</div>';
   }).join('');
+
+  // Use authoritative shotCount from server
+  if (me && typeof me.shotCount === 'number') {
+    myShotCount = me.shotCount;
+  }
 
   updateShotDots();
   updateChargeBar();
 }
 
 function updateChargeBar() {
-  const me = players.find(p => p.id === myId);
-  const fill = document.getElementById('chargeFill');
-  const key = document.getElementById('spaceKey');
-  const status = document.getElementById('beamStatus');
-  const cooldownFill = document.getElementById('beamCooldownFill');
+  var me = getMe();
+  var fill = document.getElementById('chargeFill');
+  var key = document.getElementById('spaceKey');
+  var status = document.getElementById('beamStatus');
+  var cooldownFill = document.getElementById('beamCooldownFill');
   if (!me || !fill || !key) return;
-  const cp = me.chargeProgress || 0;
-  const cooldown = Math.max(0, me.beamCooldown || 0);
+  var cp = me.chargeProgress || 0;
+  var cooldown = Math.max(0, me.beamCooldown || 0);
   fill.style.width = (cp * 100) + '%';
   if (cooldownFill) cooldownFill.style.width = (cooldown / 100 * 100) + '%';
   if (status) {
     status.textContent = cooldown > 0
-      ? `Laser cooldown · ${Math.ceil(cooldown / 20)}s`
+      ? 'Laser cooldown · ' + Math.ceil(cooldown / 20) + 's'
       : 'Laser ready · 0.5s charge';
     status.style.color = cooldown > 0 ? '#888' : '#4a9eff';
   }
@@ -670,37 +1168,40 @@ function updateChargeBar() {
 }
 
 function updateShotDots() {
-  const dots = document.querySelectorAll('#shotDots .shot-dot');
-  const mod = myShotCount % 3;
-  dots.forEach((dot, i) => {
-    dot.className = 'shot-dot';
-    if (i < mod) dot.classList.add('filled');
-    if (mod === 2 && i === 2) dot.classList.add('next-big');
-  });
-}
-
-function escHtml(s) {
-  const d = document.createElement('div');
-  d.textContent = s;
-  return d.innerHTML;
+  var dots = document.querySelectorAll('#shotDots .shot-dot');
+  var mod = myShotCount % 3;
+  for (var i = 0; i < dots.length; i++) {
+    dots[i].className = 'shot-dot';
+    if (i < mod) dots[i].classList.add('filled');
+    if (mod === 2 && i === 2) dots[i].classList.add('next-big');
+  }
 }
 
 // ─── Input: WASD movement, left-click shoot ─────────────────
 function sendDir() {
-  let dx = 0, dy = 0;
+  var dx = 0, dy = 0;
   if (keysDown.has('a') || keysDown.has('A')) dx -= 1;
   if (keysDown.has('d') || keysDown.has('D')) dx += 1;
   if (keysDown.has('w') || keysDown.has('W')) dy -= 1;
   if (keysDown.has('s') || keysDown.has('S')) dy += 1;
   if (ws && ws.readyState === 1) {
-    ws.send(JSON.stringify({ type: 'dir', dx, dy }));
+    ws.send(JSON.stringify({ type: 'dir', dx: dx, dy: dy }));
   }
 }
 
-document.addEventListener('keydown', (e) => {
-  if (document.activeElement.tagName === 'INPUT') return;
+document.addEventListener('keydown', function(e) {
+  // If focused on an input element, don't handle game keys
+  var tag = document.activeElement ? document.activeElement.tagName : '';
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
 
-  if (['a','A','d','D','w','W','s','S'].includes(e.key)) {
+  // Block all gameplay while not alive
+  if (!canPlay()) {
+    // Still prevent Space from scrolling
+    if (e.key === ' ') e.preventDefault();
+    return;
+  }
+
+  if (['a','A','d','D','w','W','s','S'].indexOf(e.key) !== -1) {
     e.preventDefault();
     if (!keysDown.has(e.key)) {
       keysDown.add(e.key);
@@ -718,10 +1219,12 @@ document.addEventListener('keydown', (e) => {
   }
 });
 
-document.addEventListener('keyup', (e) => {
+document.addEventListener('keyup', function(e) {
   if (keysDown.has(e.key)) {
     keysDown.delete(e.key);
-    sendDir();
+    if (canPlay()) {
+      sendDir();
+    }
   }
 
   // Space release = fire beam (if charged)
@@ -733,21 +1236,27 @@ document.addEventListener('keyup', (e) => {
   }
 });
 
+// Reset held keys on window blur to avoid stuck movement
+window.addEventListener('blur', function() {
+  resetInputState();
+});
+
 // ─── Shooting: left-click ────────────────────────────────────
-canvas.addEventListener('mousedown', (e) => {
-  if (e.button !== 0) return; // left-click only
+canvas.addEventListener('mousedown', function(e) {
+  if (e.button !== 0) return;
   e.preventDefault();
+  if (!canPlay()) return;
   shoot();
 });
 
 // Prevent context menu on canvas so right-click doesn't interfere
-canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+canvas.addEventListener('contextmenu', function(e) { e.preventDefault(); });
 
 function shoot() {
   if (!ws || ws.readyState !== 1) return;
+  if (!canPlay()) return;
   ws.send(JSON.stringify({ type: 'shoot', tx: mouseX, ty: mouseY }));
-  myShotCount++;
-  updateShotDots();
+  // Do NOT increment myShotCount locally — use authoritative server value
 }
 
 // ─── Start ───────────────────────────────────────────────────

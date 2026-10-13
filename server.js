@@ -26,12 +26,24 @@ const BEAM_DAMAGE = 5;
 const BEAM_WIDTH = 1.2;           // cells wide — the energy ray thickness
 const BEAM_DISPLAY_TICKS = 8;     // how long the beam visual lingers (0.4s)
 
-const COLORS = [
-  '#00FF00', '#FF0000', '#00BFFF', '#FFFF00', '#FF00FF',
-  '#FFA500', '#00FFFF', '#FF6347', '#7CFC00', '#DA70D6',
-  '#1E90FF', '#FFD700', '#FF4500', '#32CD32', '#FF69B4',
-  '#40E0D0', '#EE82EE', '#F0E68C', '#87CEEB', '#DDA0DD',
+// Exactly 7 rainbow colors — each one can be held by a single player
+const PALETTE = [
+  { color: '#FF3B30', name: 'red' },
+  { color: '#FF9500', name: 'orange' },
+  { color: '#FFD60A', name: 'yellow' },
+  { color: '#34C759', name: 'green' },
+  { color: '#00C7FF', name: 'cyan' },
+  { color: '#3F51FF', name: 'indigo' },
+  { color: '#AF52DE', name: 'violet' },
 ];
+const MAX_PLAYERS = PALETTE.length;
+const NAME_MAX_LEN = 20;
+
+const SHAPES = {
+  circle:    { w: 3, h: 3 },
+  square:    { w: 3, h: 3 },
+  rectangle: { w: 4, h: 2 },
+};
 
 const CLASS_LABELS = [
   'person', 'car', 'truck', 'bicycle', 'motorcycle',
@@ -61,13 +73,49 @@ function broadcast(data) {
   });
 }
 
+function send(ws, data) {
+  if (ws.readyState === 1) ws.send(JSON.stringify(data));
+}
+
+function isNum(v) {
+  return typeof v === 'number' && Number.isFinite(v);
+}
+
+function colorTaken(color) {
+  for (const [, p] of players) if (p.color === color) return true;
+  return false;
+}
+
+function cleanName(raw) {
+  if (typeof raw !== 'string') return '';
+  return raw.replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, NAME_MAX_LEN);
+}
+
+// Apply damage and handle death + kill credit. Returns true if the target died.
+function damagePlayer(target, amount, attackerId) {
+  if (target.dead || target.joinTicks > 0) return false;
+  target.hp -= amount;
+  if (target.hp > 0) return false;
+  target.hp = 0;
+  target.dead = true;
+  target.respawnTimer = RESPAWN_TICKS;
+  target.deaths++;
+  target.charging = false;
+  target.chargeTicks = 0;
+  const attacker = players.get(attackerId);
+  if (attacker) attacker.kills++;
+  return true;
+}
+
 function gameState() {
   const pList = [];
   for (const [id, p] of players) {
     pList.push({
       id, x: p.x, y: p.y, color: p.color,
       label: p.label, conf: p.conf,
+      name: p.name, shape: p.shape,
       w: p.w, h: p.h,
+      shotCount: p.shotCount,
       hp: p.hp, maxHp: MAX_HP,
       dead: p.dead,
       kills: p.kills,
@@ -95,18 +143,13 @@ function gameState() {
     players: pList,
     bullets: bList,
     beams: beamList,
+    palette: PALETTE,
+    maxPlayers: MAX_PLAYERS,
     arena: { w: ARENA_W, h: ARENA_H, cell: CELL },
   };
 }
 
 // ─── HTTP ────────────────────────────────────────────────────
-const MIME_TYPES = {
-  '.html': 'text/html; charset=utf-8',
-  '.png': 'image/png',
-  '.jpg': 'image/jpeg',
-  '.jpeg': 'image/jpeg',
-};
-
 const server = http.createServer((req, res) => {
   if (req.url === '/' || req.url === '/index.html') {
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
@@ -130,44 +173,70 @@ const server = http.createServer((req, res) => {
 const wss = new WebSocketServer({ server });
 
 wss.on('connection', (ws) => {
+  // A connection sits in the lobby (not in `players`) until it sends a valid join
   const id = nextId++;
-  const pos = spawnPosition();
-  const bw = 2 + Math.floor(Math.random() * 3);  // 2-4
-  const bh = 2 + Math.floor(Math.random() * 4);  // 2-5
-  const player = {
-    x: -100, y: -100,
-    color: COLORS[id % COLORS.length],
-    joinTicks: JOIN_DELAY_TICKS,
-    dx: 0, dy: 0,
-    label: CLASS_LABELS[Math.floor(Math.random() * CLASS_LABELS.length)],
-    conf: (0.75 + Math.random() * 0.24).toFixed(2),
-    w: bw, h: bh,
-    hp: MAX_HP,
-    dead: false,
-    respawnTimer: 0,
-    shotCount: 0,   // tracks shots for big bullet every 3rd
-    shootCooldown: 0, // ticks until can shoot again
-    charging: false,  // currently holding space
-    chargeTicks: 0,   // how many ticks charged so far
-    beamCooldown: 0,  // ticks until the laser can be charged again
-    chargeDirX: 0,    // aim direction when charging
-    chargeDirY: 0,
-    kills: 0,
-    deaths: 0,
-    ws,
-  };
-  players.set(id, player);
 
-  ws.send(JSON.stringify({ ...gameState(), type: 'welcome', id }));
-  broadcast(gameState());
+  send(ws, { ...gameState(), type: 'welcome', id });
+
+  function handleJoin(msg) {
+    if (players.has(id)) return;
+    const shape = typeof msg.shape === 'string' && SHAPES[msg.shape] ? msg.shape : null;
+    const entry = PALETTE.find(c => c.color === msg.color);
+    const name = cleanName(msg.name);
+    if (!shape) return send(ws, { type: 'join_error', message: 'Choose a shape.' });
+    if (!entry) return send(ws, { type: 'join_error', message: 'Choose a color.' });
+    if (!name) return send(ws, { type: 'join_error', message: `Enter a name (1-${NAME_MAX_LEN} chars).` });
+    if (players.size >= MAX_PLAYERS) return send(ws, { type: 'join_error', message: 'Session full (7/7).' });
+    if (colorTaken(entry.color)) return send(ws, { type: 'join_error', message: 'Color already taken.' });
+
+    players.set(id, {
+      x: -100, y: -100,
+      color: entry.color,
+      name, shape,
+      joinTicks: JOIN_DELAY_TICKS,
+      dx: 0, dy: 0,
+      label: CLASS_LABELS[Math.floor(Math.random() * CLASS_LABELS.length)],
+      conf: (0.75 + Math.random() * 0.24).toFixed(2),
+      w: SHAPES[shape].w, h: SHAPES[shape].h,
+      hp: MAX_HP,
+      dead: false,
+      respawnTimer: 0,
+      shotCount: 0,   // tracks shots for big bullet every 3rd
+      shootCooldown: 0, // ticks until can shoot again
+      charging: false,  // currently holding space
+      chargeTicks: 0,   // how many ticks charged so far
+      beamCooldown: 0,  // ticks until the laser can be charged again
+      chargeDirX: 0,    // aim direction when charging
+      chargeDirY: 0,
+      kills: 0,
+      deaths: 0,
+      ws,
+    });
+    broadcast(gameState());
+  }
 
   ws.on('message', (raw) => {
     try {
       const msg = JSON.parse(raw);
+      if (!msg || typeof msg !== 'object') return;
+
+      if (msg.type === 'join') return handleJoin(msg);
+
       const p = players.get(id);
       if (!p) return;
 
+      if (msg.type === 'input_reset') {
+        p.dx = 0;
+        p.dy = 0;
+        p.charging = false;
+        p.chargeTicks = 0;
+        return;
+      }
+
       if (p.joinTicks > 0) return;
+
+      // All aim coordinates must be finite numbers
+      if ('tx' in msg && (!isNum(msg.tx) || !isNum(msg.ty))) return;
 
       if (msg.type === 'dir' && !p.dead) {
         p.dx = Math.sign(msg.dx ?? 0);
@@ -250,14 +319,7 @@ wss.on('connection', (ws) => {
                 const distToBox = Math.sqrt((rx - closestX) ** 2 + (ry - closestY) ** 2);
                 if (distToBox <= BEAM_WIDTH / 2) {
                   hitIds.add(pid);
-                  target.hp -= BEAM_DAMAGE;
-                  if (target.hp <= 0) {
-                    target.hp = 0;
-                    target.dead = true;
-                    target.respawnTimer = RESPAWN_TICKS;
-                    target.deaths++;
-                    p.kills++;
-                  }
+                  damagePlayer(target, BEAM_DAMAGE, id);
                 }
               }
             }
@@ -357,18 +419,8 @@ setInterval(() => {
       // AABB collision: bullet center vs player box
       if (b.x >= p.x && b.x <= p.x + p.w &&
           b.y >= p.y && b.y <= p.y + p.h) {
-        p.hp -= b.damage;
         hit = true;
-
-        if (p.hp <= 0) {
-          p.hp = 0;
-          p.dead = true;
-          p.respawnTimer = RESPAWN_TICKS;
-          p.deaths++;
-          // Credit kill to shooter
-          const shooter = players.get(b.ownerId);
-          if (shooter) shooter.kills++;
-        }
+        damagePlayer(p, b.damage, b.ownerId);
         break;
       }
     }
