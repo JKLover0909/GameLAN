@@ -1308,22 +1308,84 @@ function trianglePath(ctx, px, py, pw, ph) {
   ctx.lineTo(t[2][0], t[2][1]);
 }
 
-// Crescent outline (stroke only): outer arc in front, inner arc behind
+// Crescent of moonlight: a glowing outline with a soft rim light, a white
+// cutting edge, swoosh arcs trailing behind and motes shed from the horns
+function crescentPath(r, b, outerA, innerA) {
+  ctx.beginPath();
+  ctx.arc(0, 0, r, -outerA, outerA, false);
+  ctx.arc(-b, 0, r, innerA, -innerA, true);
+  ctx.closePath();
+}
+
 function strokeCrescent(c) {
   var r = c.r * cellSize, b = c.back * cellSize;
   var hy = Math.sqrt(Math.max(0, r * r - b * b / 4));
   var outerA = Math.atan2(hy, -b / 2);  // horn angle on the outer circle
   var innerA = Math.atan2(hy, b / 2);   // horn angle on the inner circle
+  var pulse = 0.85 + 0.15 * Math.sin(frameCounter * 0.5);
   ctx.save();
   ctx.translate(c.x * cellSize, c.y * cellSize);
   ctx.rotate(Math.atan2(c.dy, c.dx));
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
+
+  // Swoosh: thin arcs echoing the outer rim, shorter and fainter behind
   ctx.strokeStyle = c.color;
-  ctx.lineWidth = 3;
-  ctx.beginPath();
-  ctx.arc(0, 0, r, -outerA, outerA, false);
-  ctx.arc(-b, 0, r, innerA, -innerA, true);
-  ctx.closePath();
+  ctx.shadowColor = c.color;
+  ctx.shadowBlur = 8;
+  for (var g = 1; g <= 4; g++) {
+    ctx.globalAlpha = 0.5 - g * 0.1;
+    ctx.lineWidth = 2.6 - g * 0.45;
+    var ga = outerA * (1 - g * 0.17);
+    ctx.beginPath();
+    ctx.arc(-g * 0.42 * cellSize, 0, r, -ga, ga, false);
+    ctx.stroke();
+  }
+
+  // Rim light: faint inside the hollow, brightest along the outer rim
+  var grad = ctx.createRadialGradient(-b, 0, r, -b, 0, r + b);
+  grad.addColorStop(0, 'rgba(0,0,0,0)');
+  grad.addColorStop(0.6, c.color);
+  grad.addColorStop(1, '#ffffff');
+  ctx.globalAlpha = 0.32 * pulse;
+  ctx.shadowBlur = 0;
+  ctx.fillStyle = grad;
+  crescentPath(r, b, outerA, innerA);
+  ctx.fill();
+
+  // Outline of the moon
+  ctx.globalAlpha = 0.95;
+  ctx.lineWidth = 2;
+  ctx.shadowBlur = 14 * pulse;
+  crescentPath(r, b, outerA, innerA);
   ctx.stroke();
+
+  // Cutting edge: white along the outer rim, tapering toward the horns
+  ctx.shadowColor = '#ffffff';
+  ctx.strokeStyle = '#ffffff';
+  ctx.shadowBlur = 10;
+  var edge = [[0.55, 0.85, 1.4], [1, 0.5, 2.6]]; // [alpha, arc fraction, width]
+  for (var e = 0; e < edge.length; e++) {
+    ctx.globalAlpha = edge[e][0];
+    ctx.lineWidth = edge[e][2];
+    ctx.beginPath();
+    ctx.arc(0, 0, r - 1.5, -outerA * edge[e][1], outerA * edge[e][1], false);
+    ctx.stroke();
+  }
+
+  // Motes of light shed from the horns, twinkling as it flies
+  ctx.shadowBlur = 6;
+  ctx.shadowColor = c.color;
+  ctx.fillStyle = '#ffffff';
+  for (var m = 0; m < 6; m++) {
+    var side = m % 2 ? 1 : -1;
+    var t = (m >> 1) + 1;                 // 1..3 steps behind the horn
+    var tw = 0.5 + 0.5 * Math.sin(frameCounter * 0.9 + m * 1.7);
+    ctx.globalAlpha = (0.9 - t * 0.22) * tw;
+    ctx.beginPath();
+    ctx.arc(-b / 2 - t * 0.5 * cellSize, side * (hy - t * 3), 1.6 - t * 0.3, 0, Math.PI * 2);
+    ctx.fill();
+  }
   ctx.restore();
 }
 
