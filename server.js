@@ -277,12 +277,15 @@ function gameState() {
 }
 
 // ─── HTTP ────────────────────────────────────────────────────
+// Arena backgrounds the lobby can pick from (per client, purely visual)
+const BACKGROUND_FILES = ['image.png', 'image-liveview.png'];
+
 const server = http.createServer((req, res) => {
   if (req.url === '/' || req.url === '/index.html') {
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
     fs.createReadStream(path.join(__dirname, 'index.html')).pipe(res);
-  } else if (req.url === '/image.png') {
-    const filePath = path.join(__dirname, 'image.png');
+  } else if (BACKGROUND_FILES.includes(req.url.slice(1))) {
+    const filePath = path.join(__dirname, req.url.slice(1));
     if (fs.existsSync(filePath)) {
       res.writeHead(200, { 'Content-Type': 'image/png' });
       fs.createReadStream(filePath).pipe(res);

@@ -4,3 +4,5 @@ node_modules/
 !.env.example
 *.log
 .DS_Store
+# Local-only arena background (internal screenshot, not published)
+image-liveview.png
