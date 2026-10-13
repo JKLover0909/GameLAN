@@ -134,7 +134,8 @@
   #overlay {
     position: fixed; inset: 0;
     background: rgba(0,0,0,0.9);
-    display: flex; align-items: center; justify-content: center;
+    display: flex; align-items: safe center; justify-content: center;
+    overflow-y: auto; padding: 12px 0;
     z-index: 100; font-size: 13px; color: #555;
   }
   #overlay.hidden { display: none; }
@@ -148,7 +149,7 @@
     width: 340px;
     max-width: 90vw;
   }
-  #lobbyPanel h3 {
+  #lobbyPanel h3, #modePanel h3 {
     font-size: 11px;
     color: #666;
     text-transform: uppercase;
@@ -297,6 +298,57 @@
     min-height: 14px;
   }
 
+  /* Session mode picker (first screen) */
+  #modePanel {
+    background: #141414;
+    border: 1px solid #2a2a2a;
+    padding: 24px 28px;
+    width: 340px;
+    max-width: 90vw;
+  }
+  #modePanel h3, #lobbyPanel h3 { display: flex; align-items: baseline; }
+  .mode-btn {
+    display: block; width: 100%;
+    margin-bottom: 8px; padding: 10px 12px;
+    background: #1a1a1a; border: 1px solid #333;
+    color: #888; font-family: inherit; font-size: 11px;
+    text-align: left; cursor: pointer;
+  }
+  .mode-btn:hover { border-color: #4a9eff; color: #4a9eff; }
+  .mode-btn .mode-sub { display: block; margin-top: 3px; font-size: 10px; color: #555; }
+  .mode-btn .mode-count { float: right; font-size: 10px; color: #555; }
+  #backBtn {
+    margin-left: auto; padding: 0;
+    background: none; border: none; cursor: pointer;
+    font-family: inherit; font-size: 10px; color: #555;
+    text-transform: none; letter-spacing: 0; white-space: nowrap;
+  }
+  #backBtn:hover { color: #4a9eff; }
+
+  /* Team side picker */
+  .team-options { display: flex; gap: 8px; }
+  .team-btn {
+    flex: 1; padding: 6px 8px;
+    background: #1a1a1a; border: 1px solid #333;
+    font-family: inherit; font-size: 10px; color: #666;
+    text-align: left; cursor: pointer;
+  }
+  .team-btn:hover:not(:disabled) { border-color: #555; }
+  .team-btn.selected { border-color: #4a9eff; color: #4a9eff; }
+  .team-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+  .team-btn .team-head { display: flex; align-items: center; gap: 4px; margin-bottom: 4px; }
+  .team-btn .team-count { margin-left: auto; color: #555; }
+  .team-btn .team-dot { width: 7px; height: 7px; border: 1.5px solid; }
+  .team-btn .team-roster { min-height: 39px; color: #555; font-size: 9px; line-height: 13px; overflow: hidden; }
+  .team-btn .team-roster div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .team-hint { font-size: 10px; color: #444; }
+  .class-team {
+    margin: 6px 0 2px; font-size: 9px; color: #555;
+    text-transform: uppercase; letter-spacing: 1px;
+    display: flex; justify-content: space-between;
+  }
+  .class-team:first-child { margin-top: 0; }
+
   #lobbyFull {
     color: #666;
     font-size: 10px;
@@ -339,8 +391,24 @@
   <div>
     <div id="overlayMessage">Loading detection results...</div>
     <div id="overlayCountdown"></div>
+    <div id="modePanel" style="display:none;">
+      <h3>Select Annotation Session</h3>
+      <button class="mode-btn" data-mode="free" type="button">
+        free_label <span class="mode-count" id="modeCountFree"></span>
+        <span class="mode-sub">Arena label tự do · mọi người đều là đối thủ</span>
+      </button>
+      <button class="mode-btn" data-mode="team" type="button">
+        team_label <span class="mode-count" id="modeCountTeam"></span>
+        <span class="mode-sub">Label theo đội · 2 bên, mỗi bên tối đa 3 người</span>
+      </button>
+    </div>
     <div id="lobbyPanel" style="display:none;">
-      <h3>Configure Detection Class</h3>
+      <h3><span id="lobbyTitle">Configure Detection Class</span><button id="backBtn" type="button">← sessions</button></h3>
+
+      <div class="lobby-section" id="teamSection" style="display:none;">
+        <label>Side</label>
+        <div class="team-options" id="teamOptions"></div>
+      </div>
 
       <div class="lobby-section">
         <label>Shape</label>
@@ -497,13 +565,18 @@ let mouseX = 80, mouseY = 45;
 let myShotCount = 0;
 let isCharging = false;
 
-// Client state machine: 'connecting' | 'lobby' | 'joining' | 'alive' | 'dead'
+// Client state machine: 'connecting' | 'mode' | 'lobby' | 'joining' | 'alive' | 'dead'
 let clientState = 'connecting';
+let currentMode = null;  // 'free' | 'team' once a session mode is picked
+let teams = null;        // team mode: [{ id, name, colors }] from server
+let teamMax = 3;
+let modeCounts = null;   // player counts for the mode picker
+let selectedTeam = null;
 
 // Lobby selections
 let selectedShape = null;
 let selectedColor = null;
-let lobbyBuilt = false; // prevent rebuilding color swatches every tick
+let lobbyPaletteKey = ''; // rebuild color swatches only when the offered set changes
 
 // ─── Background image ────────────────────────────────────────
 // Chosen per player in the lobby; remembered locally between sessions
@@ -595,8 +668,28 @@ function connect() {
   ws.onmessage = function(e) {
     var msg = JSON.parse(e.data);
 
+    if (msg.type === 'modes') {
+      if (msg.id != null) myId = msg.id;
+      currentMode = null;
+      teams = null;
+      players = [];
+      bullets = []; gameBeams = []; gameDashes = []; gameBlasts = []; gameCrescents = [];
+      modeCounts = msg;
+      determineClientState();
+      updateOverlay();
+      updateUI();
+      render();
+      return;
+    }
+
     if (msg.type === 'welcome') {
       myId = msg.id;
+      currentMode = msg.mode;
+      teams = msg.teams || null;
+      if (msg.teamMax) teamMax = msg.teamMax;
+      selectedTeam = null;
+      selectedColor = null;
+      lobbyPaletteKey = '';
       arenaW = msg.arena.w;
       arenaH = msg.arena.h;
       cellSize = msg.arena.cell;
@@ -662,7 +755,9 @@ function connect() {
     gameDashes = [];
     gameCrescents = [];
     palette = [];
-    lobbyBuilt = false;
+    lobbyPaletteKey = '';
+    currentMode = null;
+    teams = null;
     resetInputState();
     updateOverlay();
     setTimeout(connect, 1500);
@@ -684,7 +779,9 @@ function showKillNotice(text) {
 function determineClientState() {
   var prev = clientState;
   var me = getMe();
-  if (!me) {
+  if (!currentMode) {
+    clientState = 'mode';
+  } else if (!me) {
     // Not in players list = lobby
     clientState = 'lobby';
   } else if (me.joining) {
@@ -704,6 +801,17 @@ function updateOverlay() {
   var message = document.getElementById('overlayMessage');
   var countdown = document.getElementById('overlayCountdown');
   var lobbyPanel = document.getElementById('lobbyPanel');
+  var modePanel = document.getElementById('modePanel');
+  modePanel.style.display = clientState === 'mode' ? 'block' : 'none';
+
+  if (clientState === 'mode') {
+    overlay.classList.remove('hidden');
+    lobbyPanel.style.display = 'none';
+    message.textContent = '';
+    countdown.textContent = '';
+    updateModeCounts();
+    return;
+  }
 
   if (clientState === 'connecting') {
     overlay.classList.remove('hidden');
@@ -718,6 +826,7 @@ function updateOverlay() {
     message.textContent = '';
     countdown.textContent = '';
     lobbyPanel.style.display = 'block';
+    buildTeamOptions();
     buildLobbyColors();
     validateJoinBtn();
     return;
@@ -744,13 +853,16 @@ function buildLobbyColors() {
   if (!container) return;
 
   var taken = takenColors();
+  var offered = lobbyPalette();
 
-  // Only rebuild DOM when palette changes or first time
-  if (!lobbyBuilt || container.childElementCount !== palette.length) {
-    lobbyBuilt = true;
-    container.innerHTML = '';
-    for (var i = 0; i < palette.length; i++) {
-      var p = palette[i];
+  // Only rebuild DOM when the offered colors change
+  var key = offered.map(function(c) { return c.color; }).join(',');
+  if (key !== lobbyPaletteKey) {
+    lobbyPaletteKey = key;
+    container.innerHTML = offered.length ? '' : '<div class="team-hint">Choose a side first.</div>';
+    if (selectedColor && key.indexOf(selectedColor) === -1) selectedColor = null;
+    for (var i = 0; i < offered.length; i++) {
+      var p = offered[i];
       var wrap = document.createElement('div');
       wrap.style.display = 'flex';
       wrap.style.flexDirection = 'column';
@@ -800,7 +912,10 @@ function buildLobbyColors() {
   // Full lobby notice
   var fullEl = document.getElementById('lobbyFull');
   if (fullEl) {
-    if (palette.length > 0 && taken.size >= palette.length) {
+    if (currentMode === 'team') {
+      fullEl.textContent = teams && teams.every(function(t) { return teamPlayers(t.id).length >= teamMax; })
+        ? 'Both sides full — waiting for a free slot...' : '';
+    } else if (palette.length > 0 && taken.size >= palette.length) {
       fullEl.textContent = 'All detection slots occupied — waiting for availability...';
     } else {
       fullEl.textContent = '';
@@ -808,6 +923,97 @@ function buildLobbyColors() {
   }
 
   validateJoinBtn();
+}
+
+// Colors offered in the lobby: the whole palette, or the chosen side's set
+function lobbyPalette() {
+  if (currentMode !== 'team') return palette;
+  var team = getTeam(selectedTeam);
+  if (!team) return [];
+  return palette.filter(function(c) { return team.colors.indexOf(c.color) !== -1; });
+}
+
+function getTeam(id) {
+  if (!teams) return null;
+  for (var i = 0; i < teams.length; i++) if (teams[i].id === id) return teams[i];
+  return null;
+}
+
+function teamPlayers(id) {
+  return players.filter(function(p) { return p.team === id; });
+}
+
+// ─── Mode picker ─────────────────────────────────────────────
+function updateModeCounts() {
+  if (!modeCounts) return;
+  document.getElementById('modeCountFree').textContent =
+    modeCounts.free.players + '/' + modeCounts.free.max;
+  document.getElementById('modeCountTeam').textContent =
+    modeCounts.team.sides.map(function(s) { return s.players; }).join(' vs ');
+}
+
+(function() {
+  var btns = document.querySelectorAll('#modePanel .mode-btn');
+  for (var i = 0; i < btns.length; i++) {
+    btns[i].addEventListener('click', function() {
+      if (ws && ws.readyState === 1) {
+        ws.send(JSON.stringify({ type: 'mode', mode: this.getAttribute('data-mode') }));
+      }
+    });
+  }
+  document.getElementById('backBtn').addEventListener('click', function() {
+    if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: 'leave_mode' }));
+  });
+})();
+
+// ─── Team lobby: side picker with live rosters (the waiting room) ───
+function buildTeamOptions() {
+  var section = document.getElementById('teamSection');
+  var title = document.getElementById('lobbyTitle');
+  var isTeam = currentMode === 'team' && teams;
+  section.style.display = isTeam ? 'block' : 'none';
+  title.textContent = isTeam ? 'Team Annotation' : 'Configure Detection Class';
+  if (!isTeam) return;
+
+  var container = document.getElementById('teamOptions');
+  if (container.childElementCount !== teams.length) {
+    container.innerHTML = '';
+    for (var i = 0; i < teams.length; i++) {
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'team-btn';
+      btn.setAttribute('data-team', teams[i].id);
+      btn.addEventListener('click', onTeamClick);
+      container.appendChild(btn);
+    }
+  }
+  var btns = container.querySelectorAll('.team-btn');
+  for (var j = 0; j < btns.length; j++) {
+    var team = getTeam(btns[j].getAttribute('data-team'));
+    var members = teamPlayers(team.id);
+    var full = members.length >= teamMax;
+    if (full && selectedTeam === team.id) selectedTeam = null;
+    btns[j].disabled = full;
+    btns[j].classList.toggle('selected', selectedTeam === team.id);
+    var dots = team.colors.map(function(c) {
+      return '<span class="team-dot" style="border-color:' + escAttr(c) + '"></span>';
+    }).join('');
+    var roster = members.map(function(m) {
+      return '<div style="color:' + escAttr(m.color) + '">' + escHtml(m.name || m.label) + '</div>';
+    }).join('');
+    btns[j].innerHTML =
+      '<div class="team-head">' + dots + ' ' + escHtml(team.name) +
+      '<span class="team-count">' + members.length + '/' + teamMax + '</span></div>' +
+      '<div class="team-roster">' + (roster || '—') + '</div>';
+  }
+}
+
+function onTeamClick(e) {
+  var btn = e.currentTarget;
+  if (btn.disabled) return;
+  selectedTeam = btn.getAttribute('data-team');
+  buildTeamOptions();
+  buildLobbyColors();
 }
 
 function onColorSwatchClick(e) {
@@ -915,7 +1121,8 @@ function validateJoinBtn() {
   if (!btn) return;
   var nameInput = document.getElementById('nameInput');
   var name = nameInput ? nameInput.value.trim() : '';
-  var valid = selectedShape && selectedColor && name.length >= 1 && name.length <= 20;
+  var valid = selectedShape && selectedColor && name.length >= 1 && name.length <= 20 &&
+    (currentMode !== 'team' || selectedTeam);
   btn.disabled = !valid;
 }
 
@@ -946,6 +1153,7 @@ document.getElementById('joinBtn').addEventListener('click', function() {
     type: 'join',
     shape: selectedShape,
     color: selectedColor,
+    team: selectedTeam,
     name: name
   }));
 });
@@ -1515,14 +1723,26 @@ function updateUI() {
     return (b.kills || 0) - (a.kills || 0);
   });
 
+  if (currentMode === 'team') {
+    sorted.sort(function(a, b) { return a.team === b.team ? 0 : a.team < b.team ? 1 : -1; });
+  }
+  var lastTeam = null;
   el.innerHTML = sorted.map(function(p) {
+    var heading = '';
+    if (currentMode === 'team' && p.team !== lastTeam) {
+      lastTeam = p.team;
+      var mates = teamPlayers(p.team);
+      var teamKills = mates.reduce(function(n, m) { return n + (m.kills || 0); }, 0);
+      heading = '<div class="class-team"><span>' + escHtml(p.team || '') + ' · ' + mates.length + '/' + teamMax +
+        '</span><span>' + teamKills + ' tp</span></div>';
+    }
     var hpPct = Math.max(0, (p.hp / p.maxHp) * 100);
     var hpColor = hpPct > 60 ? '#00ff00' : hpPct > 30 ? '#ffaa00' : '#ff3333';
     var isMe = p.id === myId;
     var dotClass = 'class-dot' + (p.shape === 'circle' || p.shape === 'triangle' ? ' ' + p.shape : '');
     var safeName = p.name ? escHtml(p.name) : '';
     var safeLabel = escHtml(p.label);
-    return '<div class="class-row">' +
+    return heading + '<div class="class-row">' +
       (p.shape === 'triangle'
         ? '<svg class="' + dotClass + '" viewBox="0 0 12 12" style="' + (p.dead ? 'opacity:0.3' : '') + '"><polygon points="6,1 11,11 1,11" fill="none" stroke="' + escAttr(p.color) + '" stroke-width="2"/></svg>'
         : '<div class="' + dotClass + '" style="border-color:' + escAttr(p.color) + (p.dead ? ';opacity:0.3' : '') + '"></div>') +

@@ -38,6 +38,14 @@ const PALETTE = [
 ];
 const MAX_PLAYERS = PALETTE.length;
 
+// Team mode: two sides of up to 3, warm colors vs cool colors
+const TEAMS = [
+  { id: 'warm', name: 'warm', colors: ['#FF3B30', '#FF9500', '#FFD60A'] },
+  { id: 'cool', name: 'cool', colors: ['#34C759', '#00C7FF', '#3F51FF'] },
+];
+const TEAM_MAX = 3;
+const MODES = ['free', 'team'];
+
 // ─── E skill constants (ticks at 20tps) ──────────────────────
 // Cooldowns for shield/upgrade start after the effect ends.
 const SKILL_COOLDOWN = { circle: 100, square: 40, rectangle: 200, triangle: 80 };
@@ -108,12 +116,21 @@ const CLASS_LABELS = [
 ];
 
 // ─── State ───────────────────────────────────────────────────
-const players = new Map();   // id → player
-const bullets = [];          // { x, y, vx, vy, ownerId, big, size, color }
-const beams = [];            // { x, y, dx, dy, ownerId, color, life }
-const dashes = [];           // { x1, y1, x2, y2, color, life } — square dash trails
-const blasts = [];           // { x, y, r0, r, color, life } — shield explosions
-const crescents = [];        // { x, y, dx, dy, ownerId, color, life } — triangle E
+// Each mode runs in its own room with its own players and projectiles
+function makeRoom(mode) {
+  return {
+    mode,
+    sockets: new Set(),    // connections viewing this room
+    players: new Map(),    // id → player
+    bullets: [],           // { x, y, vx, vy, ownerId, team, big, size, color }
+    beams: [],             // { x, y, dx, dy, ownerId, color, life }
+    dashes: [],            // { x1, y1, x2, y2, color, life } — square dash trails
+    blasts: [],            // { x, y, r0, r, color, life } — shield explosions
+    crescents: [],         // { x, y, dx, dy, ownerId, team, color, life } — triangle E
+  };
+}
+const rooms = { free: makeRoom('free'), team: makeRoom('team') };
+const modeSockets = new Set(); // connections still on the mode-select screen
 let nextId = 1;
 let nextBulletId = 1;
 
@@ -141,21 +158,25 @@ function rayToWall(x0, y0, dx, dy) {
   return best;
 }
 
-function spawnPosition(w = 4, h = 3) {
+// Teams spawn behind their own wall (warm left, cool right); free mode anywhere
+function spawnPosition(w = 4, h = 3, team = null) {
+  const [minX, maxX] = team === 'warm' ? [1, WALLS[0].x - w - 1]
+                     : team === 'cool' ? [WALLS[1].x + WALLS[1].w + 1, ARENA_W - w - 1]
+                     : [3, ARENA_W - 4];
   for (;;) {
     const pos = {
-      x: Math.floor(Math.random() * (ARENA_W - 6)) + 3,
+      x: minX + Math.floor(Math.random() * (maxX - minX + 1)),
       y: Math.floor(Math.random() * (ARENA_H - 6)) + 3,
     };
     if (!hitsWall(pos.x, pos.y, w, h)) return pos;
   }
 }
 
-function broadcast(data) {
+function broadcast(room, data) {
   const msg = JSON.stringify(data);
-  wss.clients.forEach((c) => {
+  for (const c of room.sockets) {
     if (c.readyState === 1) c.send(msg);
-  });
+  }
 }
 
 function send(ws, data) {
@@ -166,9 +187,20 @@ function isNum(v) {
   return typeof v === 'number' && Number.isFinite(v);
 }
 
-function colorTaken(color) {
-  for (const [, p] of players) if (p.color === color) return true;
+function colorTaken(room, color) {
+  for (const [, p] of room.players) if (p.color === color) return true;
   return false;
+}
+
+// Teammates never hurt each other; in free mode nobody has a team
+function allies(teamA, teamB) {
+  return teamA != null && teamA === teamB;
+}
+
+function teamCount(room, teamId) {
+  let n = 0;
+  for (const [, p] of room.players) if (p.team === teamId) n++;
+  return n;
 }
 
 function cleanName(raw) {
@@ -177,7 +209,7 @@ function cleanName(raw) {
 }
 
 // Apply damage and handle death + kill credit. Returns true if the target died.
-function damagePlayer(target, amount, attackerId) {
+function damagePlayer(room, target, amount, attackerId) {
   if (target.dead || target.joinTicks > 0) return false;
   target.hp -= amount;
   if (target.hp > 0) return false;
@@ -195,7 +227,7 @@ function damagePlayer(target, amount, attackerId) {
     target.upgradeTicks = 0;
     target.skillCooldown = SKILL_COOLDOWN[target.shape];
   }
-  const attacker = players.get(attackerId);
+  const attacker = room.players.get(attackerId);
   if (attacker) {
     attacker.kills++;
     attacker.streak++;
@@ -221,7 +253,7 @@ function distToBox(px, py, p) {
 }
 
 // Shield ends (expired or broken by a laser): heal, explode, start the cooldown
-function endShield(id, p) {
+function endShield(room, id, p) {
   p.shieldTicks = 0;
   p.hp = Math.min(MAX_HP, p.hp + SHIELD_HEAL);
   p.skillCooldown = SKILL_COOLDOWN.circle;
@@ -229,12 +261,13 @@ function endShield(id, p) {
   const c = bodyCenter(p);
   const r0 = shieldRadius(p);
   const r = r0 + SHIELD_BLAST_EXTRA;
-  for (const [pid, target] of players) {
+  for (const [pid, target] of room.players) {
     // Another active shield soaks the blast without breaking
     if (pid === id || target.dead || target.joinTicks > 0 || target.shieldTicks > 0) continue;
-    if (distToBox(c.x, c.y, target) <= r) damagePlayer(target, SHIELD_BLAST_DAMAGE, id);
+    if (allies(p.team, target.team)) continue;
+    if (distToBox(c.x, c.y, target) <= r) damagePlayer(room, target, SHIELD_BLAST_DAMAGE, id);
   }
-  blasts.push({ ownerId: id, x: c.x, y: c.y, r0, r, color: p.color, life: BLAST_DISPLAY_TICKS });
+  room.blasts.push({ ownerId: id, x: c.x, y: c.y, r0, r, color: p.color, life: BLAST_DISPLAY_TICKS });
 }
 
 // Distance from point (px,py) to segment (ax,ay)-(bx,by)
@@ -246,7 +279,7 @@ function distToSegment(px, py, ax, ay, bx, by) {
 }
 
 // Fire one laser from (cx,cy) along (ndx,ndy); pierces every player it touches
-function fireBeam(ownerId, owner, cx, cy, ndx, ndy) {
+function fireBeam(room, ownerId, owner, cx, cy, ndx, ndy) {
   const hitIds = new Set();
   // The laser pierces walls (only bullets are blocked by them)
   const maxDist = Math.sqrt(ARENA_W * ARENA_W + ARENA_H * ARENA_H);
@@ -254,25 +287,26 @@ function fireBeam(ownerId, owner, cx, cy, ndx, ndy) {
     const rx = cx + ndx * t;
     const ry = cy + ndy * t;
     if (rx < -1 || rx > ARENA_W + 1 || ry < -1 || ry > ARENA_H + 1) break;
-    for (const [pid, target] of players) {
+    for (const [pid, target] of room.players) {
       if (pid === ownerId || target.dead || target.joinTicks > 0 || hitIds.has(pid)) continue;
+      if (allies(owner.team, target.team)) continue;
       if (target.shieldTicks > 0) {
         // The shield absorbs the laser and breaks
         const c = bodyCenter(target);
         if (Math.hypot(rx - c.x, ry - c.y) <= shieldRadius(target) + BEAM_WIDTH / 2) {
           hitIds.add(pid);
-          endShield(pid, target);
+          endShield(room, pid, target);
         }
         continue;
       }
       // Check if ray point is within BEAM_WIDTH/2 of target box
       if (distToBox(rx, ry, target) <= BEAM_WIDTH / 2) {
         hitIds.add(pid);
-        damagePlayer(target, BEAM_DAMAGE, ownerId);
+        damagePlayer(room, target, BEAM_DAMAGE, ownerId);
       }
     }
   }
-  beams.push({
+  room.beams.push({
     x: cx, y: cy,
     dx: ndx, dy: ndy,
     ownerId,
@@ -281,7 +315,7 @@ function fireBeam(ownerId, owner, cx, cy, ndx, ndy) {
   });
 }
 
-function useSkill(id, p, tx, ty) {
+function useSkill(room, id, p, tx, ty) {
   if (p.skillCooldown > 0 || p.shieldTicks > 0 || p.upgradeTicks > 0) return;
 
   if (p.shape === 'circle') {
@@ -295,7 +329,7 @@ function useSkill(id, p, tx, ty) {
     const dist = Math.hypot(ddx, ddy);
     if (dist < 0.1) return;
     p.skillCooldown = SKILL_COOLDOWN.triangle;
-    crescents.push({ x: c.x, y: c.y, dx: ddx / dist, dy: ddy / dist, ownerId: id, color: p.color, life: CRESCENT_LIFE });
+    room.crescents.push({ x: c.x, y: c.y, dx: ddx / dist, dy: ddy / dist, ownerId: id, team: p.team, color: p.color, life: CRESCENT_LIFE });
   } else if (p.shape === 'square') {
     const start = bodyCenter(p);
     const ddx = tx - start.x;
@@ -318,17 +352,18 @@ function useSkill(id, p, tx, ty) {
     p.skillCooldown = SKILL_COOLDOWN.square;
 
     let killed = false;
-    for (const [pid, target] of players) {
+    for (const [pid, target] of room.players) {
       // A shielded circle is immune to the dash and the shield holds
       if (pid === id || target.dead || target.joinTicks > 0 || target.shieldTicks > 0) continue;
+      if (allies(p.team, target.team)) continue;
       const c = bodyCenter(target);
       const reach = (Math.max(p.w, p.h) + Math.max(target.w, target.h)) / 2;
       if (distToSegment(c.x, c.y, start.x, start.y, end.x, end.y) <= reach) {
-        if (damagePlayer(target, DASH_DAMAGE, id)) killed = true;
+        if (damagePlayer(room, target, DASH_DAMAGE, id)) killed = true;
       }
     }
     if (killed) p.skillCooldown = 0;   // a dash kill refreshes the dash
-    dashes.push({ ownerId: id, x1: start.x, y1: start.y, x2: end.x, y2: end.y, color: p.color, life: DASH_DISPLAY_TICKS });
+    room.dashes.push({ ownerId: id, x1: start.x, y1: start.y, x2: end.x, y2: end.y, color: p.color, life: DASH_DISPLAY_TICKS });
   }
 }
 
@@ -338,7 +373,7 @@ function crescentPoints(c) {
 }
 
 // Advance one crescent by a tick: 'fly', or why it is spent ('wall', 'hit', 'gone')
-function stepCrescent(c) {
+function stepCrescent(room, c) {
   for (let s = 0; s < CRESCENT_SUBSTEPS; s++) {
     c.x += c.dx * CRESCENT_SPEED / CRESCENT_SUBSTEPS;
     c.y += c.dy * CRESCENT_SPEED / CRESCENT_SUBSTEPS;
@@ -346,8 +381,9 @@ function stepCrescent(c) {
     if (c.x < -m || c.x > ARENA_W + m || c.y < -m || c.y > ARENA_H + m) return 'gone';
     const pts = crescentPoints(c);
     if (pts.some(([x, y]) => hitsWall(x, y, 0, 0))) return 'wall';
-    for (const [pid, target] of players) {
+    for (const [pid, target] of room.players) {
       if (pid === c.ownerId || target.dead || target.joinTicks > 0) continue;
+      if (allies(c.team, target.team)) continue; // passes through teammates
       if (target.shieldTicks > 0) {
         // The shield blocks the crescent and holds
         const tc = bodyCenter(target);
@@ -356,7 +392,7 @@ function stepCrescent(c) {
         continue;
       }
       if (pts.some(([x, y]) => x >= target.x && x <= target.x + target.w && y >= target.y && y <= target.y + target.h)) {
-        if (!damagePlayer(target, CRESCENT_DAMAGE, c.ownerId)) target.slowTicks = SLOW_TICKS;
+        if (!damagePlayer(room, target, CRESCENT_DAMAGE, c.ownerId)) target.slowTicks = SLOW_TICKS;
         return 'hit';
       }
     }
@@ -364,13 +400,13 @@ function stepCrescent(c) {
   return 'fly';
 }
 
-function gameState() {
+function gameState(room) {
   const pList = [];
-  for (const [id, p] of players) {
+  for (const [id, p] of room.players) {
     pList.push({
       id, x: p.x, y: p.y, color: p.color,
       label: p.label, conf: p.conf,
-      name: p.name, shape: p.shape,
+      name: p.name, shape: p.shape, team: p.team,
       w: p.w, h: p.h,
       shotCount: p.shotCount,
       hp: p.hp, maxHp: MAX_HP,
@@ -392,12 +428,12 @@ function gameState() {
       joinTicks: p.joinTicks,
     });
   }
-  const bList = bullets.map(b => ({
+  const bList = room.bullets.map(b => ({
     id: b.id, x: b.x, y: b.y,
     size: b.size, big: b.big,
     color: b.color, ownerId: b.ownerId,
   }));
-  const beamList = beams.map(b => ({
+  const beamList = room.beams.map(b => ({
     x: b.x, y: b.y, dx: b.dx, dy: b.dy,
     color: b.color, ownerId: b.ownerId, life: b.life,
     maxLife: BEAM_DISPLAY_TICKS,
@@ -407,14 +443,17 @@ function gameState() {
     players: pList,
     bullets: bList,
     beams: beamList,
-    dashes: dashes.map(d => ({ ...d, maxLife: DASH_DISPLAY_TICKS })),
-    blasts: blasts.map(b => ({ ...b, maxLife: BLAST_DISPLAY_TICKS })),
-    crescents: crescents.map(c => ({
+    dashes: room.dashes.map(d => ({ ...d, maxLife: DASH_DISPLAY_TICKS })),
+    blasts: room.blasts.map(b => ({ ...b, maxLife: BLAST_DISPLAY_TICKS })),
+    crescents: room.crescents.map(c => ({
       x: c.x, y: c.y, dx: c.dx, dy: c.dy, color: c.color, ownerId: c.ownerId,
       r: CRESCENT.r, back: CRESCENT.back,
     })),
+    mode: room.mode,
     palette: PALETTE,
-    maxPlayers: MAX_PLAYERS,
+    maxPlayers: room.mode === 'team' ? TEAMS.length * TEAM_MAX : MAX_PLAYERS,
+    teams: room.mode === 'team' ? TEAMS : null,
+    teamMax: TEAM_MAX,
     arena: { w: ARENA_W, h: ARENA_H, cell: CELL },
     walls: WALLS,
   };
@@ -446,27 +485,70 @@ const server = http.createServer((req, res) => {
 // ─── WebSocket ───────────────────────────────────────────────
 const wss = new WebSocketServer({ server });
 
-wss.on('connection', (ws) => {
-  // A connection sits in the lobby (not in `players`) until it sends a valid join
-  const id = nextId++;
+// Player counts shown on the mode-select screen
+function modeSummary() {
+  return {
+    type: 'modes',
+    free: { players: rooms.free.players.size, max: MAX_PLAYERS },
+    team: {
+      max: TEAM_MAX,
+      sides: TEAMS.map(t => ({ id: t.id, players: teamCount(rooms.team, t.id) })),
+    },
+  };
+}
 
-  send(ws, { ...gameState(), type: 'welcome', id });
+wss.on('connection', (ws) => {
+  // A connection starts on the mode-select screen, then views one room's
+  // lobby (not in `players`) until it sends a valid join
+  const id = nextId++;
+  let room = null;
+
+  modeSockets.add(ws);
+  send(ws, { ...modeSummary(), id });
+
+  function enterMode(mode) {
+    if (room || !MODES.includes(mode)) return;
+    modeSockets.delete(ws);
+    room = rooms[mode];
+    room.sockets.add(ws);
+    send(ws, { ...gameState(room), type: 'welcome', id });
+  }
+
+  function leaveRoom() {
+    if (!room) return;
+    const r = room;
+    r.sockets.delete(ws);
+    r.players.delete(id);
+    // remove projectiles and effects owned by this player
+    for (const key of ['bullets', 'beams', 'dashes', 'blasts', 'crescents']) {
+      const list = r[key];
+      for (let i = list.length - 1; i >= 0; i--) {
+        if (list[i].ownerId === id) list.splice(i, 1);
+      }
+    }
+    room = null;
+    broadcast(r, gameState(r));
+  }
 
   function handleJoin(msg) {
-    if (players.has(id)) return;
+    if (room.players.has(id)) return;
     const shape = typeof msg.shape === 'string' && SHAPES[msg.shape] ? msg.shape : null;
     const entry = PALETTE.find(c => c.color === msg.color);
     const name = cleanName(msg.name);
+    const team = room.mode === 'team' ? TEAMS.find(t => t.id === msg.team) : null;
     if (!shape) return send(ws, { type: 'join_error', message: 'Choose a shape.' });
-    if (!entry) return send(ws, { type: 'join_error', message: 'Choose a color.' });
+    if (room.mode === 'team' && !team) return send(ws, { type: 'join_error', message: 'Choose a side.' });
+    if (!entry || (team && !team.colors.includes(entry.color))) return send(ws, { type: 'join_error', message: 'Choose a color.' });
     if (!name) return send(ws, { type: 'join_error', message: `Enter a name (1-${NAME_MAX_LEN} chars).` });
-    if (players.size >= MAX_PLAYERS) return send(ws, { type: 'join_error', message: 'Session full (7/7).' });
-    if (colorTaken(entry.color)) return send(ws, { type: 'join_error', message: 'Color already taken.' });
+    if (team && teamCount(room, team.id) >= TEAM_MAX) return send(ws, { type: 'join_error', message: `Side full (${TEAM_MAX}/${TEAM_MAX}).` });
+    if (!team && room.players.size >= MAX_PLAYERS) return send(ws, { type: 'join_error', message: 'Session full (7/7).' });
+    if (colorTaken(room, entry.color)) return send(ws, { type: 'join_error', message: 'Color already taken.' });
 
-    players.set(id, {
+    room.players.set(id, {
       x: -100, y: -100,
       color: entry.color,
       name, shape,
+      team: team ? team.id : null,
       joinTicks: JOIN_DELAY_TICKS,
       dx: 0, dy: 0,
       label: CLASS_LABELS[Math.floor(Math.random() * CLASS_LABELS.length)],
@@ -491,7 +573,7 @@ wss.on('connection', (ws) => {
       deaths: 0,
       ws,
     });
-    broadcast(gameState());
+    broadcast(room, gameState(room));
   }
 
   ws.on('message', (raw) => {
@@ -499,9 +581,18 @@ wss.on('connection', (ws) => {
       const msg = JSON.parse(raw);
       if (!msg || typeof msg !== 'object') return;
 
+      if (msg.type === 'mode') return enterMode(msg.mode);
+      if (!room) return;
+      // Back to the mode-select screen (only from the lobby, not mid-game)
+      if (msg.type === 'leave_mode') {
+        if (room.players.has(id)) return;
+        leaveRoom();
+        modeSockets.add(ws);
+        return send(ws, { ...modeSummary(), id });
+      }
       if (msg.type === 'join') return handleJoin(msg);
 
-      const p = players.get(id);
+      const p = room.players.get(id);
       if (!p) return;
 
       if (msg.type === 'input_reset') {
@@ -542,11 +633,12 @@ wss.on('connection', (ws) => {
         // Upgraded rectangle fires two parallel bullets
         const offsets = p.upgradeTicks > 0 ? [-TWIN_OFFSET, TWIN_OFFSET] : [0];
         for (const off of offsets) {
-          bullets.push({
+          room.bullets.push({
             id: nextBulletId++,
             x: cx - ndy * off, y: cy + ndx * off,
             vx: ndx * BULLET_SPEED, vy: ndy * BULLET_SPEED,
             ownerId: id,
+            team: p.team,
             big: isBig,
             size: isBig ? BIG_BULLET_SIZE : SMALL_BULLET_SIZE,
             damage: isBig ? 3 : 1,
@@ -558,7 +650,7 @@ wss.on('connection', (ws) => {
 
       // ── E skill (shape-specific) ──
       if (msg.type === 'skill' && !p.dead) {
-        useSkill(id, p, msg.tx, msg.ty);
+        useSkill(room, id, p, msg.tx, msg.ty);
       }
 
       // ── Charge beam (Space) ──
@@ -586,7 +678,7 @@ wss.on('connection', (ws) => {
             // Upgraded rectangle fires two parallel lasers
             const offsets = p.upgradeTicks > 0 ? [-TWIN_OFFSET, TWIN_OFFSET] : [0];
             for (const off of offsets) {
-              fireBeam(id, p, cx - ndy * off, cy + ndx * off, ndx, ndy);
+              fireBeam(room, id, p, cx - ndy * off, cy + ndx * off, ndx, ndy);
             }
             p.beamCooldown = BEAM_COOLDOWN_TICKS;
           }
@@ -598,35 +690,29 @@ wss.on('connection', (ws) => {
   });
 
   ws.on('close', () => {
-    players.delete(id);
-    // remove bullets and beams owned by this player
-    for (let i = bullets.length - 1; i >= 0; i--) {
-      if (bullets[i].ownerId === id) bullets.splice(i, 1);
-    }
-    for (let i = beams.length - 1; i >= 0; i--) {
-      if (beams[i].ownerId === id) beams.splice(i, 1);
-    }
-    for (let i = dashes.length - 1; i >= 0; i--) {
-      if (dashes[i].ownerId === id) dashes.splice(i, 1);
-    }
-    for (let i = blasts.length - 1; i >= 0; i--) {
-      if (blasts[i].ownerId === id) blasts.splice(i, 1);
-    }
-    for (let i = crescents.length - 1; i >= 0; i--) {
-      if (crescents[i].ownerId === id) crescents.splice(i, 1);
-    }
-    broadcast(gameState());
+    modeSockets.delete(ws);
+    leaveRoom();
   });
 });
 
 // ─── Game loop (20 tps) ──────────────────────────────────────
+let loopTicks = 0;
 setInterval(() => {
+  for (const room of Object.values(rooms)) tickRoom(room);
+  // Refresh the mode-select counts once a second
+  if (++loopTicks % 20 === 0 && modeSockets.size > 0) {
+    const msg = JSON.stringify(modeSummary());
+    for (const c of modeSockets) if (c.readyState === 1) c.send(msg);
+  }
+}, 50);
+
+function tickRoom(room) {
   // Move players & tick cooldowns
-  for (const [id, p] of players) {
+  for (const [id, p] of room.players) {
     if (p.joinTicks > 0) {
       p.joinTicks--;
       if (p.joinTicks === 0) {
-        const pos = spawnPosition(p.w, p.h);
+        const pos = spawnPosition(p.w, p.h, p.team);
         p.x = pos.x;
         p.y = pos.y;
       }
@@ -639,7 +725,7 @@ setInterval(() => {
     // Tick active E effects
     if (p.shieldTicks > 0 && !p.dead) {
       p.shieldTicks--;
-      if (p.shieldTicks === 0) endShield(id, p);
+      if (p.shieldTicks === 0) endShield(room, id, p);
     }
     if (p.upgradeTicks > 0 && !p.dead) {
       p.upgradeTicks--;
@@ -657,7 +743,7 @@ setInterval(() => {
       p.respawnTimer--;
       if (p.respawnTimer <= 0) {
         // Respawn
-        const pos = spawnPosition(p.w, p.h);
+        const pos = spawnPosition(p.w, p.h, p.team);
         p.x = pos.x;
         p.y = pos.y;
         p.hp = MAX_HP;
@@ -679,8 +765,8 @@ setInterval(() => {
   }
 
   // Move bullets & collision
-  for (let i = bullets.length - 1; i >= 0; i--) {
-    const b = bullets[i];
+  for (let i = room.bullets.length - 1; i >= 0; i--) {
+    const b = room.bullets[i];
     // Swept check so a fast bullet cannot skip over a thin wall in one tick
     const wallHit = rayToWall(b.x, b.y, b.vx, b.vy) <= 1;
     b.x += b.vx;
@@ -689,14 +775,15 @@ setInterval(() => {
 
     // Hit a wall, out of bounds or expired
     if (wallHit || b.x < -1 || b.x > ARENA_W + 1 || b.y < -1 || b.y > ARENA_H + 1 || b.life <= 0) {
-      bullets.splice(i, 1);
+      room.bullets.splice(i, 1);
       continue;
     }
 
     // Check collision with players
     let hit = false;
-    for (const [pid, p] of players) {
+    for (const [pid, p] of room.players) {
       if (pid === b.ownerId || p.dead || p.joinTicks > 0) continue;
+      if (allies(b.team, p.team)) continue; // passes through teammates
       // Shield blocks normal and big bullets
       if (p.shieldTicks > 0) {
         const c = bodyCenter(p);
@@ -710,44 +797,44 @@ setInterval(() => {
       if (b.x >= p.x && b.x <= p.x + p.w &&
           b.y >= p.y && b.y <= p.y + p.h) {
         hit = true;
-        damagePlayer(p, b.damage, b.ownerId);
+        damagePlayer(room, p, b.damage, b.ownerId);
         break;
       }
     }
     if (hit) {
-      bullets.splice(i, 1);
+      room.bullets.splice(i, 1);
     }
   }
 
   // Move crescents: blocked by walls and shields, stop at the first body hit
-  for (let i = crescents.length - 1; i >= 0; i--) {
-    const c = crescents[i];
+  for (let i = room.crescents.length - 1; i >= 0; i--) {
+    const c = room.crescents[i];
     const fresh = c.life === CRESCENT_LIFE;
-    const result = stepCrescent(c);
+    const result = stepCrescent(room, c);
     // Fired point-blank into a wall: the skill is not wasted
     if (result === 'wall' && fresh) {
-      const owner = players.get(c.ownerId);
+      const owner = room.players.get(c.ownerId);
       if (owner) owner.skillCooldown = 0;
     }
-    if (result !== 'fly' || --c.life <= 0) crescents.splice(i, 1);
+    if (result !== 'fly' || --c.life <= 0) room.crescents.splice(i, 1);
   }
 
   // Tick beam display lifetime
-  for (let i = beams.length - 1; i >= 0; i--) {
-    beams[i].life--;
-    if (beams[i].life <= 0) beams.splice(i, 1);
+  for (let i = room.beams.length - 1; i >= 0; i--) {
+    room.beams[i].life--;
+    if (room.beams[i].life <= 0) room.beams.splice(i, 1);
   }
-  for (let i = dashes.length - 1; i >= 0; i--) {
-    dashes[i].life--;
-    if (dashes[i].life <= 0) dashes.splice(i, 1);
+  for (let i = room.dashes.length - 1; i >= 0; i--) {
+    room.dashes[i].life--;
+    if (room.dashes[i].life <= 0) room.dashes.splice(i, 1);
   }
-  for (let i = blasts.length - 1; i >= 0; i--) {
-    blasts[i].life--;
-    if (blasts[i].life <= 0) blasts.splice(i, 1);
+  for (let i = room.blasts.length - 1; i >= 0; i--) {
+    room.blasts[i].life--;
+    if (room.blasts[i].life <= 0) room.blasts.splice(i, 1);
   }
 
-  broadcast(gameState());
-}, 50);
+  broadcast(room, gameState(room));
+}
 
 // ─── Start ───────────────────────────────────────────────────
 server.listen(PORT, '0.0.0.0', () => {
