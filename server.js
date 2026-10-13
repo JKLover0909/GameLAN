@@ -77,7 +77,7 @@ const SLOW_SPEED_MULT = 0.7;      // slowed targets move 30% slower
 // ─── Items: one drops at a random spot every 10s ─────────────
 const ITEM_INTERVAL_TICKS = 200;  // 10s at 20tps
 const ITEM_MAX = 3;               // uncollected items on the field at once
-const ITEM_SIZE = 2.4;            // cells, pickup box
+const ITEM_SIZE = 3.6;            // cells, pickup box
 const ITEM_KINDS = ['heal', 'speed', 'damage'];
 const ITEM_HEAL = 2;
 const SPEED_BUFF_TICKS = 120;     // 6s
@@ -501,7 +501,7 @@ const BACKGROUND_FILES = ['image.png', 'image-liveview.png'];
 
 const server = http.createServer((req, res) => {
   if (req.url === '/' || req.url === '/index.html') {
-    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache' });
     fs.createReadStream(path.join(__dirname, 'index.html')).pipe(res);
   } else if (BACKGROUND_FILES.includes(req.url.slice(1))) {
     const filePath = path.join(__dirname, req.url.slice(1));

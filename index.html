@@ -1664,22 +1664,22 @@ function strokeItem(it) {
   var cx = x + sz / 2, cy = y + sz / 2;
   var color = ITEM_COLORS[it.kind];
   var pop = it.age < ITEM_POP_TICKS ? it.age / ITEM_POP_TICKS : 1; // 0 → 1
+  var n = SPAWN_RING_COLORS.length;
   ctx.save();
   ctx.lineJoin = 'round';
   ctx.lineCap = 'round';
 
   if (pop < 1) {
     // Pops in: a burst of seven rainbow rays and a rainbow ring snapping out
-    var n = SPAWN_RING_COLORS.length;
     var ease = 1 - (1 - pop) * (1 - pop);
     for (var i = 0; i < n; i++) {
       var ang = (i / n) * Math.PI * 2 + 0.3;
-      var r1 = sz * (0.4 + 1.1 * ease), r2 = r1 + sz * 0.6 * (1 - pop);
+      var r1 = sz * (0.4 + 1.1 * ease), r2 = r1 + sz * 0.7 * (1 - pop);
       ctx.globalAlpha = 1 - pop;
       ctx.strokeStyle = SPAWN_RING_COLORS[i];
       ctx.shadowColor = SPAWN_RING_COLORS[i];
-      ctx.shadowBlur = 10;
-      ctx.lineWidth = 2.5;
+      ctx.shadowBlur = 16;
+      ctx.lineWidth = 7;
       ctx.beginPath();
       ctx.moveTo(cx + Math.cos(ang) * r1, cy + Math.sin(ang) * r1);
       ctx.lineTo(cx + Math.cos(ang) * r2, cy + Math.sin(ang) * r2);
@@ -1692,35 +1692,64 @@ function strokeItem(it) {
     color = SPAWN_RING_COLORS[it.age % n];
   }
 
-  // Idle: gentle bob and breathing glow
-  var bob = Math.sin((frameCounter + it.id * 7) * 0.15) * 2;
+  // Beacon: a ring pulses out from the item every 1.5s so it catches the eye
+  var beat = ((frameCounter + it.id * 11) % 30) / 30;
+  ctx.globalAlpha = 0.8 * (1 - beat);
+  ctx.strokeStyle = color;
+  ctx.shadowColor = color;
+  ctx.shadowBlur = 12;
+  ctx.lineWidth = 5 * (1 - beat) + 1;
+  ctx.beginPath();
+  ctx.arc(cx, cy, sz * (0.75 + 0.6 * beat), 0, Math.PI * 2);
+  ctx.stroke();
+
+  // Icon: thick dark halo under a bright coloured outline with a white core
+  var bob = Math.sin((frameCounter + it.id * 7) * 0.15) * 4;
   var scale = pop < 1 ? 0.4 + 0.8 * pop - 0.2 * Math.max(0, pop - 0.75) * 4 : 1;
+  var iy = cy + bob, isz = sz * scale;
   ctx.globalAlpha = 1;
-  // Dark under-stroke keeps the icon readable on bright backgrounds
-  ctx.strokeStyle = 'rgba(0,0,0,0.75)';
-  ctx.lineWidth = 6;
-  itemIconPath(it.kind, cx, cy + bob, sz * scale);
+  ctx.shadowBlur = 0;
+  ctx.strokeStyle = 'rgba(0,0,0,0.85)';
+  ctx.lineWidth = 16;
+  itemIconPath(it.kind, cx, iy, isz);
   ctx.stroke();
   ctx.strokeStyle = color;
   ctx.shadowColor = color;
-  ctx.shadowBlur = 8 + 6 * (0.5 + 0.5 * Math.sin(frameCounter * 0.2 + it.id));
-  ctx.lineWidth = 3;
-  itemIconPath(it.kind, cx, cy + bob, sz * scale);
+  ctx.shadowBlur = 18 + 10 * (0.5 + 0.5 * Math.sin(frameCounter * 0.2 + it.id));
+  ctx.lineWidth = 8;
+  itemIconPath(it.kind, cx, iy, isz);
+  ctx.stroke();
+  ctx.shadowBlur = 0;
+  ctx.strokeStyle = '#ffffff';
+  ctx.globalAlpha = 0.85;
+  ctx.lineWidth = 2.5;
+  itemIconPath(it.kind, cx, iy, isz);
   ctx.stroke();
 
-  // Annotation-style dashed box and label around it
-  ctx.shadowBlur = 0;
-  ctx.globalAlpha = 0.8;
-  ctx.lineWidth = 1.5;
-  ctx.setLineDash([4, 3]);
-  ctx.strokeRect(x - 3, y - 3 + bob, sz + 6, sz + 6);
-  ctx.setLineDash([]);
+  // Annotation-style corner brackets and a label tag above
+  var pad = 8, bx = x - pad, by = y - pad + bob, bw = sz + pad * 2, cl = sz * 0.28;
   ctx.globalAlpha = 1;
-  ctx.fillStyle = color;
-  ctx.font = 'bold 9px Consolas, Monaco, monospace';
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 5;
+  for (var c = 0; c < 4; c++) {
+    var sx = c & 1 ? 1 : 0, sy = c & 2 ? 1 : 0;
+    var kx = bx + sx * bw, ky = by + sy * bw;
+    var dx = sx ? -1 : 1, dy = sy ? -1 : 1;
+    ctx.beginPath();
+    ctx.moveTo(kx + dx * cl, ky);
+    ctx.lineTo(kx, ky);
+    ctx.lineTo(kx, ky + dy * cl);
+    ctx.stroke();
+  }
+  ctx.font = 'bold 22px Consolas, Monaco, monospace';
   ctx.textAlign = 'left';
   ctx.textBaseline = 'bottom';
-  ctx.fillText(ITEM_LABELS[it.kind], x - 3, y - 5 + bob);
+  var label = ITEM_LABELS[it.kind];
+  var tw = ctx.measureText(label).width;
+  ctx.fillStyle = 'rgba(0,0,0,0.8)';
+  ctx.fillRect(bx, by - 30, tw + 12, 28);
+  ctx.fillStyle = color;
+  ctx.fillText(label, bx + 6, by - 5);
   ctx.restore();
 }
 
@@ -1729,25 +1758,25 @@ function strokePickup(pk) {
   var t = 1 - pk.life / pk.maxLife;
   var color = ITEM_COLORS[pk.kind];
   var cx = pk.x * cellSize, cy = pk.y * cellSize;
-  var base = 2.4 * cellSize;
+  var base = 3.6 * cellSize;
   ctx.save();
   ctx.lineJoin = 'round';
   ctx.strokeStyle = color;
   ctx.shadowColor = color;
   ctx.shadowBlur = 12;
   ctx.globalAlpha = 1 - t;
-  ctx.lineWidth = 2;
+  ctx.lineWidth = 6;
   itemIconPath(pk.kind, cx, cy - t * 18, base * (1 + t));
   ctx.stroke();
-  ctx.lineWidth = 3 * (1 - t) + 0.5;
+  ctx.lineWidth = 8 * (1 - t) + 1;
   ctx.beginPath();
   ctx.arc(cx, cy, base * (0.6 + 1.6 * t), 0, Math.PI * 2);
   ctx.stroke();
   ctx.fillStyle = color;
-  ctx.font = 'bold 10px Consolas, Monaco, monospace';
+  ctx.font = 'bold 24px Consolas, Monaco, monospace';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'bottom';
-  ctx.fillText(ITEM_LABELS[pk.kind], cx, cy - base * 0.8 - t * 24);
+  ctx.fillText(ITEM_LABELS[pk.kind], cx, cy - base * 0.8 - t * 40);
   ctx.restore();
 }
 
