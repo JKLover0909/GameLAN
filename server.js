@@ -77,6 +77,7 @@ const SLOW_SPEED_MULT = 0.7;      // slowed targets move 30% slower
 // ─── Items: one drops at a random spot every 10s ─────────────
 const ITEM_INTERVAL_TICKS = 200;  // 10s at 20tps
 const ITEM_MAX = 3;               // uncollected items on the field at once
+const ITEM_LIFE_TICKS = 200;      // 10s on the field, then it vanishes
 const ITEM_SIZE = 1.8;            // cells, pickup box
 const ITEM_KINDS = ['heal', 'speed', 'damage'];
 const ITEM_HEAL = 2;
@@ -481,7 +482,7 @@ function gameState(room) {
       x: c.x, y: c.y, dx: c.dx, dy: c.dy, color: c.color, ownerId: c.ownerId,
       r: CRESCENT.r, back: CRESCENT.back,
     })),
-    items: room.items.map(it => ({ id: it.id, kind: it.kind, x: it.x, y: it.y, size: ITEM_SIZE, age: it.age })),
+    items: room.items.map(it => ({ id: it.id, kind: it.kind, x: it.x, y: it.y, size: ITEM_SIZE, age: it.age, life: ITEM_LIFE_TICKS })),
     pickups: room.pickups.map(pk => ({ ...pk, maxLife: PICKUP_DISPLAY_TICKS })),
     mode: room.mode,
     palette: PALETTE,
@@ -784,7 +785,7 @@ function tickItems(room) {
   }
   for (let i = room.items.length - 1; i >= 0; i--) {
     const it = room.items[i];
-    it.age++;
+    if (++it.age >= ITEM_LIFE_TICKS) { room.items.splice(i, 1); continue; }
     for (const [, p] of room.players) {
       if (p.dead || p.joinTicks > 0) continue;
       if (p.x < it.x + ITEM_SIZE && p.x + p.w > it.x && p.y < it.y + ITEM_SIZE && p.y + p.h > it.y) {

@@ -1664,6 +1664,9 @@ function strokeItem(it) {
   var cx = x + sz / 2, cy = y + sz / 2;
   var color = ITEM_COLORS[it.kind];
   var pop = it.age < ITEM_POP_TICKS ? it.age / ITEM_POP_TICKS : 1; // 0 → 1
+  // Blinks faster and faster over its last 2s before vanishing
+  var left = it.life - it.age;
+  if (left < 40 && Math.floor(frameCounter / (left < 20 ? 2 : 4)) % 2) return;
   var n = SPAWN_RING_COLORS.length;
   ctx.save();
   ctx.lineJoin = 'round';
