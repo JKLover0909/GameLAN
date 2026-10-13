@@ -390,13 +390,10 @@ function stepCrescent(room, c) {
       if (pid === c.ownerId || target.dead || target.joinTicks > 0 || c.hitIds.has(pid)) continue;
       if (allies(c.team, target.team)) continue; // passes through teammates
       if (target.shieldTicks > 0) {
-        // The crescent breaks the shield (like a laser) and flies on
+        // Only a laser breaks a shield: it stops the crescent and holds
         const tc = bodyCenter(target);
         const sr = shieldRadius(target);
-        if (pts.some(([x, y]) => Math.hypot(x - tc.x, y - tc.y) <= sr)) {
-          c.hitIds.add(pid);
-          endShield(room, pid, target);
-        }
+        if (pts.some(([x, y]) => Math.hypot(x - tc.x, y - tc.y) <= sr)) return 'gone';
         continue;
       }
       if (pts.some(([x, y]) => x >= target.x && x <= target.x + target.w && y >= target.y && y <= target.y + target.h)) {
