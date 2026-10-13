@@ -48,6 +48,7 @@ const SHIELD_BLAST_DAMAGE = 2;    // shield explodes when it expires or breaks
 const SHIELD_BLAST_EXTRA = 1.5;   // blast reach beyond the shield ring (cells)
 const BLAST_DISPLAY_TICKS = 8;
 const DASH_DISTANCE_MULT = 3;     // square: 3× own size
+const DASH_MIN_MOVE = 0.05;       // dashes shorter than this are refunded
 const DASH_DAMAGE = 3;
 const DASH_DISPLAY_TICKS = 6;
 const UPGRADE_TICKS = 100;        // rectangle: 5s upgraded state
@@ -271,6 +272,8 @@ function useSkill(id, p, tx, ty) {
       p.y = ny;
     }
     const end = bodyCenter(p);
+    // Dashing straight into a wall moves nothing: keep the skill ready
+    if (Math.hypot(end.x - start.x, end.y - start.y) < DASH_MIN_MOVE) return;
     p.skillCooldown = SKILL_COOLDOWN.square;
 
     let killed = false;
