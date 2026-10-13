@@ -437,7 +437,8 @@ function gameState(room) {
   }
   const bList = room.bullets.map(b => ({
     id: b.id, x: b.x, y: b.y,
-    size: b.size, big: b.big,
+    size: b.size, big: b.big, twin: b.twin,
+    vx: b.vx, vy: b.vy,
     color: b.color, ownerId: b.ownerId,
   }));
   const beamList = room.beams.map(b => ({
@@ -669,6 +670,7 @@ wss.on('connection', (ws) => {
             ownerId: id,
             team: p.team,
             big: isBig,
+            twin: p.upgradeTicks > 0,
             size: isBig ? BIG_BULLET_SIZE : SMALL_BULLET_SIZE,
             damage: isBig ? 3 : 1,
             color: p.color,

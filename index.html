@@ -1389,6 +1389,72 @@ function strokeCrescent(c) {
   ctx.restore();
 }
 
+// Upgraded rectangle bullets: a slim tracer dart, or a double-chevron
+// arrowhead for the big shot, both pointing along their flight
+function strokeTwinBullet(b, bpx, bpy, bsz) {
+  var ang = Math.atan2(b.vy || 0, b.vx || 1);
+  ctx.save();
+  ctx.translate(bpx, bpy);
+  ctx.rotate(ang);
+  ctx.strokeStyle = b.color;
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
+  ctx.shadowColor = b.color;
+  ctx.shadowBlur = 8;
+  if (!b.big) {
+    var L = Math.max(bsz * 2.6, 15), Wd = Math.max(bsz * 0.9, 6);
+    // Dart body
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(L / 2, 0);
+    ctx.lineTo(0, -Wd / 2);
+    ctx.lineTo(-L / 2, 0);
+    ctx.lineTo(0, Wd / 2);
+    ctx.closePath();
+    ctx.stroke();
+    // Tracer tail
+    ctx.globalAlpha = 0.45;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(-L / 2, 0);
+    ctx.lineTo(-L * 1.4, 0);
+    ctx.stroke();
+  } else {
+    var s = Math.max(bsz * 1.2, 18);
+    ctx.lineWidth = 2.5;
+    // Double chevron, the leading one brighter
+    for (var k = 0; k < 2; k++) {
+      var off = -k * s * 0.55;
+      ctx.globalAlpha = k ? 0.55 : 1;
+      ctx.beginPath();
+      ctx.moveTo(off - s * 0.45, -s * 0.6);
+      ctx.lineTo(off + s * 0.45, 0);
+      ctx.lineTo(off - s * 0.45, s * 0.6);
+      ctx.stroke();
+    }
+    // Core diamond
+    ctx.globalAlpha = 1;
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = '#ffffff';
+    ctx.beginPath();
+    ctx.moveTo(s * 0.2, 0);
+    ctx.lineTo(0, -s * 0.16);
+    ctx.lineTo(-s * 0.2, 0);
+    ctx.lineTo(0, s * 0.16);
+    ctx.closePath();
+    ctx.stroke();
+    // Two exhaust streaks from the chevron tips
+    ctx.strokeStyle = b.color;
+    ctx.globalAlpha = 0.35;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(-s * 1.0, -s * 0.6); ctx.lineTo(-s * 2.0, -s * 0.6);
+    ctx.moveTo(-s * 1.0, s * 0.6); ctx.lineTo(-s * 2.0, s * 0.6);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
 // ─── Death shatter: the outline breaks into flying stroke fragments ───
 var SHARD_MS = 900;
 var shards = []; // { x, y, hx, hy, vx, vy, spin, color, born } in cells
@@ -1527,6 +1593,8 @@ function render() {
     var bpx = b.x * cellSize;
     var bpy = b.y * cellSize;
     var bsz = b.size * cellSize;
+
+    if (b.twin) { strokeTwinBullet(b, bpx, bpy, bsz); continue; }
 
     ctx.strokeStyle = b.color;
     ctx.lineWidth = b.big ? 2.5 : 1.5;
