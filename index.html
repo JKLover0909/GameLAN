@@ -1588,6 +1588,39 @@ function strokeBlast(bl) {
   ctx.restore();
 }
 
+// Spawn protection: seven rainbow arcs spinning around the body, fading out
+// as the protection runs down
+var SPAWN_RING_COLORS = ['#FF3B30', '#FF9500', '#FFD60A', '#34C759', '#00C7FF', '#3F51FF', '#AF52DE'];
+function strokeSpawnShield(p, px, py, pw, ph) {
+  var k = p.spawnTicks / (p.spawnMax || 10); // 1 → 0
+  var cx = px + pw / 2, cy = py + ph / 2;
+  var r = Math.hypot(pw, ph) / 2 + 6;
+  var n = SPAWN_RING_COLORS.length;
+  var spin = frameCounter * 0.35;
+  var seg = (Math.PI * 2) / n;
+  ctx.save();
+  ctx.lineCap = 'round';
+  ctx.lineWidth = 3;
+  ctx.shadowBlur = 10;
+  for (var i = 0; i < n; i++) {
+    var a = spin + i * seg;
+    ctx.globalAlpha = 0.35 + 0.6 * k;
+    ctx.strokeStyle = SPAWN_RING_COLORS[i];
+    ctx.shadowColor = SPAWN_RING_COLORS[i];
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, a, a + seg * 0.8);
+    ctx.stroke();
+    // Faint inner echo turning the other way
+    ctx.globalAlpha = 0.25 * k;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.arc(cx, cy, r - 4, -spin * 1.3 + i * seg, -spin * 1.3 + i * seg + seg * 0.6);
+    ctx.stroke();
+    ctx.lineWidth = 3;
+  }
+  ctx.restore();
+}
+
 // ─── Death shatter: the outline breaks into flying stroke fragments ───
 var SHARD_MS = 900;
 var shards = []; // { x, y, hx, hy, vx, vy, spin, color, born } in cells
@@ -1799,6 +1832,9 @@ function render() {
       ctx.shadowBlur = 0;
       ctx.restore();
     }
+
+    // ── Spawn protection: rotating seven-colour ring ──
+    if (p.spawnTicks > 0) strokeSpawnShield(p, px, py, pw, ph);
 
     // ── Circle shield: dashed contour like a segmentation mask ──
     if (p.shieldTicks > 0) {

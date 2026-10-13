@@ -17,6 +17,7 @@ const BIG_BULLET_SIZE = 1.0;      // cells
 const RESPAWN_TICKS = 60;         // 3 seconds at 20tps
 const SHOOT_COOLDOWN = 8;         // ticks between shots (0.4s at 20tps)
 const JOIN_DELAY_TICKS = 60;      // 3s wait before entering the arena
+const SPAWN_PROTECT_TICKS = 10;   // 0.5s of invulnerability after (re)spawning
 
 // ─── Charge beam constants ───────────────────────────────────
 const CHARGE_TICKS = 10;          // 0.5s at 20tps to fully charge
@@ -213,7 +214,7 @@ function cleanName(raw) {
 
 // Apply damage and handle death + kill credit. Returns true if the target died.
 function damagePlayer(room, target, amount, attackerId) {
-  if (target.dead || target.joinTicks > 0) return false;
+  if (target.dead || target.joinTicks > 0 || target.spawnTicks > 0) return false;
   target.hp -= amount;
   if (target.hp > 0) return false;
   target.hp = 0;
@@ -400,6 +401,7 @@ function stepCrescent(room, c) {
       }
       if (pts.some(([x, y]) => x >= target.x && x <= target.x + target.w && y >= target.y && y <= target.y + target.h)) {
         c.hitIds.add(pid);
+        if (target.spawnTicks > 0) continue; // spawn protection: no damage, no slow
         if (!damagePlayer(room, target, CRESCENT_DAMAGE, c.ownerId)) target.slowTicks = SLOW_TICKS;
       }
     }
@@ -433,6 +435,7 @@ function gameState(room) {
       joining: p.joinTicks > 0,
       joinProgress: p.joinTicks > 0 ? 1 - p.joinTicks / JOIN_DELAY_TICKS : 1,
       joinTicks: p.joinTicks,
+      spawnTicks: p.spawnTicks, spawnMax: SPAWN_PROTECT_TICKS,
     });
   }
   const bList = room.bullets.map(b => ({
@@ -574,6 +577,7 @@ wss.on('connection', (ws) => {
       name, shape,
       team: team ? team.id : null,
       joinTicks: JOIN_DELAY_TICKS,
+      spawnTicks: 0,    // spawn protection time left
       dx: 0, dy: 0,
       label: CLASS_LABELS[Math.floor(Math.random() * CLASS_LABELS.length)],
       conf: (0.75 + Math.random() * 0.24).toFixed(2),
@@ -759,12 +763,14 @@ setInterval(() => {
 function tickRoom(room) {
   // Move players & tick cooldowns
   for (const [id, p] of room.players) {
+    if (p.spawnTicks > 0) p.spawnTicks--;
     if (p.joinTicks > 0) {
       p.joinTicks--;
       if (p.joinTicks === 0) {
         const pos = spawnPosition(p.w, p.h, p.team);
         p.x = pos.x;
         p.y = pos.y;
+        p.spawnTicks = SPAWN_PROTECT_TICKS;
       }
     }
     if (p.shootCooldown > 0) p.shootCooldown--;
@@ -800,6 +806,7 @@ function tickRoom(room) {
         p.dead = false;
         p.dx = 0;
         p.dy = 0;
+        p.spawnTicks = SPAWN_PROTECT_TICKS;
       }
       continue;
     }
