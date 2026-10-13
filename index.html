@@ -1696,23 +1696,28 @@ function strokeItem(it) {
   var bob = Math.sin((frameCounter + it.id * 7) * 0.15) * 2;
   var scale = pop < 1 ? 0.4 + 0.8 * pop - 0.2 * Math.max(0, pop - 0.75) * 4 : 1;
   ctx.globalAlpha = 1;
+  // Dark under-stroke keeps the icon readable on bright backgrounds
+  ctx.strokeStyle = 'rgba(0,0,0,0.75)';
+  ctx.lineWidth = 6;
+  itemIconPath(it.kind, cx, cy + bob, sz * scale);
+  ctx.stroke();
   ctx.strokeStyle = color;
   ctx.shadowColor = color;
   ctx.shadowBlur = 8 + 6 * (0.5 + 0.5 * Math.sin(frameCounter * 0.2 + it.id));
-  ctx.lineWidth = 2.5;
+  ctx.lineWidth = 3;
   itemIconPath(it.kind, cx, cy + bob, sz * scale);
   ctx.stroke();
 
   // Annotation-style dashed box and label around it
   ctx.shadowBlur = 0;
-  ctx.globalAlpha = 0.55;
-  ctx.lineWidth = 1;
-  ctx.setLineDash([3, 3]);
+  ctx.globalAlpha = 0.8;
+  ctx.lineWidth = 1.5;
+  ctx.setLineDash([4, 3]);
   ctx.strokeRect(x - 3, y - 3 + bob, sz + 6, sz + 6);
   ctx.setLineDash([]);
-  ctx.globalAlpha = 0.8;
+  ctx.globalAlpha = 1;
   ctx.fillStyle = color;
-  ctx.font = '8px Consolas, Monaco, monospace';
+  ctx.font = 'bold 9px Consolas, Monaco, monospace';
   ctx.textAlign = 'left';
   ctx.textBaseline = 'bottom';
   ctx.fillText(ITEM_LABELS[it.kind], x - 3, y - 5 + bob);
@@ -1724,7 +1729,7 @@ function strokePickup(pk) {
   var t = 1 - pk.life / pk.maxLife;
   var color = ITEM_COLORS[pk.kind];
   var cx = pk.x * cellSize, cy = pk.y * cellSize;
-  var base = 1.6 * cellSize;
+  var base = 2.4 * cellSize;
   ctx.save();
   ctx.lineJoin = 'round';
   ctx.strokeStyle = color;
