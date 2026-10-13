@@ -615,6 +615,7 @@ function connect() {
         arenaH = msg.arena.h;
         cellSize = msg.arena.cell;
       }
+      spawnDeathShards(players, msg.players);
       players = msg.players;
       bullets = msg.bullets || [];
       gameBeams = msg.beams || [];
@@ -1013,6 +1014,79 @@ function strokeShape(ctx, px, py, pw, ph, shape) {
   }
 }
 
+// ─── Death shatter: the outline breaks into flying stroke fragments ───
+var SHARD_MS = 900;
+var shards = []; // { x, y, hx, hy, vx, vy, spin, color, born } in cells
+
+// Compare previous and new player lists; anyone who just died shatters
+function spawnDeathShards(prevList, nextList) {
+  var prevById = {};
+  for (var i = 0; i < prevList.length; i++) prevById[prevList[i].id] = prevList[i];
+  var now = performance.now();
+  for (var j = 0; j < nextList.length; j++) {
+    var p = nextList[j];
+    var before = prevById[p.id];
+    if (!p.dead || !before || before.dead || before.joining) continue;
+    // Use the last alive position — the box where it was actually seen
+    var w = before.w || 3, h = before.h || 3;
+    var cx = before.x + w / 2, cy = before.y + h / 2;
+    var pts = [];
+    if (before.shape === 'circle') {
+      for (var a = 0; a < 10; a++) {
+        var ang = (a / 10) * Math.PI * 2;
+        pts.push([cx + Math.cos(ang) * w / 2, cy + Math.sin(ang) * h / 2]);
+      }
+    } else {
+      // Each edge split in two so the box breaks into 8 pieces
+      var corners = [[before.x, before.y], [before.x + w, before.y], [before.x + w, before.y + h], [before.x, before.y + h]];
+      for (var c = 0; c < 4; c++) {
+        var c1 = corners[c], c2 = corners[(c + 1) % 4];
+        pts.push(c1, [(c1[0] + c2[0]) / 2, (c1[1] + c2[1]) / 2]);
+      }
+    }
+    for (var k = 0; k < pts.length; k++) {
+      var s = pts[k], e = pts[(k + 1) % pts.length];
+      var mx = (s[0] + e[0]) / 2, my = (s[1] + e[1]) / 2;
+      var ox = mx - cx, oy = my - cy;
+      var ol = Math.hypot(ox, oy) || 1;
+      var speed = 2.5 + Math.random() * 2.5; // cells per second
+      shards.push({
+        x: mx, y: my,
+        hx: (e[0] - s[0]) / 2, hy: (e[1] - s[1]) / 2,
+        vx: (ox / ol) * speed + (Math.random() - 0.5), vy: (oy / ol) * speed + (Math.random() - 0.5),
+        spin: (Math.random() - 0.5) * 8,
+        color: before.color,
+        born: now
+      });
+    }
+  }
+}
+
+function drawDeathShards() {
+  var now = performance.now();
+  var live = [];
+  for (var i = 0; i < shards.length; i++) {
+    var s = shards[i];
+    var t = (now - s.born) / 1000;
+    var k = t * 1000 / SHARD_MS;
+    if (k >= 1) continue;
+    live.push(s);
+    var x = (s.x + s.vx * t) * cellSize, y = (s.y + s.vy * t) * cellSize;
+    var ca = Math.cos(s.spin * t), sa = Math.sin(s.spin * t);
+    var hx = (s.hx * ca - s.hy * sa) * cellSize, hy = (s.hx * sa + s.hy * ca) * cellSize;
+    ctx.save();
+    ctx.globalAlpha = 1 - k;
+    ctx.strokeStyle = s.color;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(x - hx, y - hy);
+    ctx.lineTo(x + hx, y + hy);
+    ctx.stroke();
+    ctx.restore();
+  }
+  shards = live;
+}
+
 // Draw corner markers for rect shapes
 function drawCornerMarkers(ctx, px, py, pw, ph, color) {
   var cLen = Math.min(8, pw * 0.25, ph * 0.25);
@@ -1238,6 +1312,9 @@ function render() {
     ctx.fillText('LOST', dpx + dpw / 2, dpy + dph / 2);
     ctx.restore();
   }
+
+  // ── Death shatter fragments ──
+  drawDeathShards();
 
   // ── Draw square dash trails ──
   for (var dsi = 0; dsi < gameDashes.length; dsi++) {
