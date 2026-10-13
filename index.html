@@ -1698,39 +1698,39 @@ function strokeItem(it) {
   ctx.strokeStyle = color;
   ctx.shadowColor = color;
   ctx.shadowBlur = 12;
-  ctx.lineWidth = 5 * (1 - beat) + 1;
+  ctx.lineWidth = 4 * (1 - beat) + 1;
   ctx.beginPath();
   ctx.arc(cx, cy, sz * (0.75 + 0.6 * beat), 0, Math.PI * 2);
   ctx.stroke();
 
   // Icon: thick dark halo under a bright coloured outline with a white core
-  var bob = Math.sin((frameCounter + it.id * 7) * 0.15) * 4;
+  var bob = Math.sin((frameCounter + it.id * 7) * 0.15) * 3;
   var scale = pop < 1 ? 0.4 + 0.8 * pop - 0.2 * Math.max(0, pop - 0.75) * 4 : 1;
   var iy = cy + bob, isz = sz * scale;
   ctx.globalAlpha = 1;
   ctx.shadowBlur = 0;
   ctx.strokeStyle = 'rgba(0,0,0,0.85)';
-  ctx.lineWidth = 16;
+  ctx.lineWidth = 11;
   itemIconPath(it.kind, cx, iy, isz);
   ctx.stroke();
   ctx.strokeStyle = color;
   ctx.shadowColor = color;
-  ctx.shadowBlur = 18 + 10 * (0.5 + 0.5 * Math.sin(frameCounter * 0.2 + it.id));
-  ctx.lineWidth = 8;
+  ctx.shadowBlur = 12 + 8 * (0.5 + 0.5 * Math.sin(frameCounter * 0.2 + it.id));
+  ctx.lineWidth = 6;
   itemIconPath(it.kind, cx, iy, isz);
   ctx.stroke();
   ctx.shadowBlur = 0;
   ctx.strokeStyle = '#ffffff';
   ctx.globalAlpha = 0.85;
-  ctx.lineWidth = 2.5;
+  ctx.lineWidth = 2;
   itemIconPath(it.kind, cx, iy, isz);
   ctx.stroke();
 
   // Annotation-style corner brackets and a label tag above
-  var pad = 8, bx = x - pad, by = y - pad + bob, bw = sz + pad * 2, cl = sz * 0.28;
+  var pad = 5, bx = x - pad, by = y - pad + bob, bw = sz + pad * 2, cl = sz * 0.28;
   ctx.globalAlpha = 1;
   ctx.strokeStyle = color;
-  ctx.lineWidth = 5;
+  ctx.lineWidth = 4;
   for (var c = 0; c < 4; c++) {
     var sx = c & 1 ? 1 : 0, sy = c & 2 ? 1 : 0;
     var kx = bx + sx * bw, ky = by + sy * bw;
@@ -1741,15 +1741,15 @@ function strokeItem(it) {
     ctx.lineTo(kx, ky + dy * cl);
     ctx.stroke();
   }
-  ctx.font = 'bold 22px Consolas, Monaco, monospace';
+  ctx.font = 'bold 16px Consolas, Monaco, monospace';
   ctx.textAlign = 'left';
   ctx.textBaseline = 'bottom';
   var label = ITEM_LABELS[it.kind];
   var tw = ctx.measureText(label).width;
   ctx.fillStyle = 'rgba(0,0,0,0.8)';
-  ctx.fillRect(bx, by - 30, tw + 12, 28);
+  ctx.fillRect(bx, by - 23, tw + 10, 21);
   ctx.fillStyle = color;
-  ctx.fillText(label, bx + 6, by - 5);
+  ctx.fillText(label, bx + 5, by - 4);
   ctx.restore();
 }
 
@@ -1758,7 +1758,7 @@ function strokePickup(pk) {
   var t = 1 - pk.life / pk.maxLife;
   var color = ITEM_COLORS[pk.kind];
   var cx = pk.x * cellSize, cy = pk.y * cellSize;
-  var base = 3.6 * cellSize;
+  var base = 1.8 * cellSize;
   ctx.save();
   ctx.lineJoin = 'round';
   ctx.strokeStyle = color;
@@ -1773,10 +1773,10 @@ function strokePickup(pk) {
   ctx.arc(cx, cy, base * (0.6 + 1.6 * t), 0, Math.PI * 2);
   ctx.stroke();
   ctx.fillStyle = color;
-  ctx.font = 'bold 24px Consolas, Monaco, monospace';
+  ctx.font = 'bold 18px Consolas, Monaco, monospace';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'bottom';
-  ctx.fillText(ITEM_LABELS[pk.kind], cx, cy - base * 0.8 - t * 40);
+  ctx.fillText(ITEM_LABELS[pk.kind], cx, cy - base * 0.8 - t * 30);
   ctx.restore();
 }
 

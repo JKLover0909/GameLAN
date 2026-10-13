@@ -77,7 +77,7 @@ const SLOW_SPEED_MULT = 0.7;      // slowed targets move 30% slower
 // ─── Items: one drops at a random spot every 10s ─────────────
 const ITEM_INTERVAL_TICKS = 200;  // 10s at 20tps
 const ITEM_MAX = 3;               // uncollected items on the field at once
-const ITEM_SIZE = 3.6;            // cells, pickup box
+const ITEM_SIZE = 1.8;            // cells, pickup box
 const ITEM_KINDS = ['heal', 'speed', 'damage'];
 const ITEM_HEAL = 2;
 const SPEED_BUFF_TICKS = 120;     // 6s
