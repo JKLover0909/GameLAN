@@ -69,7 +69,6 @@ const UPGRADE_SHOOT_COOLDOWN = 6; // and fires faster (0.3s instead of 0.4s)
 const TWIN_OFFSET = 0.7;          // cells between parallel bullets / beams
 const CRESCENT_SPEED = BULLET_SPEED * 1.3; // triangle: 30% faster than a bullet
 const CRESCENT_DAMAGE = 3;
-const CRESCENT_AREA_MULT = 2;     // crescent area = 2× the triangle's area
 const CRESCENT_SUBSTEPS = 2;      // so it cannot skip over a thin body
 const CRESCENT_LIFE = 200;        // max ticks alive
 const SLOW_TICKS = 40;            // 2s slow on hit
@@ -106,16 +105,14 @@ const SHAPES = {
 };
 
 // Crescent ("moon") shape in its local frame, x = flight direction: inside the
-// outer circle (radius 1 at the origin) and outside the inner circle (radius 1
-// centred CRESCENT_BACK behind). Scaled so its area hits the target.
-const CRESCENT_BACK = 0.6;
+// outer circle (radius CRESCENT_R at the origin) and outside the inner circle
+// (same radius, centred CRESCENT_BACK × radius behind). CRESCENT_R sets the
+// tip-to-tip span; CRESCENT_BACK sets how thick the blade is in the middle.
+const CRESCENT_R = 2.67;
+const CRESCENT_BACK = 0.35;
 const CRESCENT = (() => {
   const inLune = (x, y, k) => x * x + y * y <= k * k && (x + CRESCENT_BACK * k) ** 2 + y * y > k * k;
-  // Lune area of the unit shape: circle minus the overlap of two unit circles
-  const h = CRESCENT_BACK / 2;
-  const unitArea = Math.PI - (2 * Math.acos(h) - 2 * h * Math.sqrt(1 - h * h));
-  const area = SHAPES.triangle.w * SHAPES.triangle.h / 2 * CRESCENT_AREA_MULT;
-  const scale = Math.sqrt(area / unitArea);
+  const scale = CRESCENT_R;
   // Grid of sample points covering the shape, used for collisions
   const step = 0.25;
   const points = [];
