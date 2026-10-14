@@ -3,7 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const { WebSocketServer } = require('ws');
 
-const PORT = Number(process.env.PORT) || 3636;
+const PORT = 3636;
 
 // ─── Game constants ──────────────────────────────────────────
 const ARENA_W = 80;
@@ -178,17 +178,30 @@ function rayToWall(x0, y0, dx, dy) {
   return best;
 }
 
-// Teams spawn behind their own wall (warm left, cool right); free mode anywhere
-function spawnPosition(w = 4, h = 3, team = null) {
+// True if a w×h box at (x,y) overlaps a live body other than skipId.
+// A circle with its shield up is passable, so it never blocks anyone.
+function hitsBody(room, skipId, x, y, w, h) {
+  for (const [qid, q] of room.players) {
+    if (qid === skipId || q.dead || q.joinTicks > 0 || q.shieldTicks > 0) continue;
+    if (x < q.x + q.w && x + w > q.x && y < q.y + q.h && y + h > q.y) return true;
+  }
+  return false;
+}
+
+// Teams spawn behind their own wall (warm left, cool right); free mode anywhere.
+// Avoids landing on another body, unless the area is too crowded to find a gap.
+function spawnPosition(w, h, team, room, skipId) {
   const [minX, maxX] = team === 'warm' ? [1, WALLS[0].x - w - 1]
                      : team === 'cool' ? [WALLS[1].x + WALLS[1].w + 1, ARENA_W - w - 1]
                      : [3, ARENA_W - 4];
-  for (;;) {
+  for (let tries = 0; ; tries++) {
     const pos = {
       x: minX + Math.floor(Math.random() * (maxX - minX + 1)),
       y: Math.floor(Math.random() * (ARENA_H - 6)) + 3,
     };
-    if (!hitsWall(pos.x, pos.y, w, h)) return pos;
+    if (hitsWall(pos.x, pos.y, w, h)) continue;
+    if (tries < 200 && hitsBody(room, skipId, pos.x, pos.y, w, h)) continue;
+    return pos;
   }
 }
 
@@ -828,7 +841,7 @@ function tickRoom(room) {
     if (p.joinTicks > 0) {
       p.joinTicks--;
       if (p.joinTicks === 0) {
-        const pos = spawnPosition(p.w, p.h, p.team);
+        const pos = spawnPosition(p.w, p.h, p.team, room, id);
         p.x = pos.x;
         p.y = pos.y;
         p.spawnTicks = SPAWN_PROTECT_TICKS;
@@ -862,7 +875,7 @@ function tickRoom(room) {
       p.respawnTimer--;
       if (p.respawnTimer <= 0) {
         // Respawn
-        const pos = spawnPosition(p.w, p.h, p.team);
+        const pos = spawnPosition(p.w, p.h, p.team, room, id);
         p.x = pos.x;
         p.y = pos.y;
         p.hp = MAX_HP;
@@ -879,10 +892,21 @@ function tickRoom(room) {
       if (p.upgradeTicks > 0) speedMult *= UPGRADE_SPEED_MULT;
       if (p.slowTicks > 0) speedMult *= SLOW_SPEED_MULT;
       if (p.speedTicks > 0) speedMult *= SPEED_BUFF_MULT;
-      const nx = p.x + p.dx * SPEED * speedMult;
-      const ny = p.y + p.dy * SPEED * speedMult;
-      if (nx >= 0 && nx + p.w <= ARENA_W && !hitsWall(nx, p.y, p.w, p.h)) p.x = nx;
-      if (ny >= 0 && ny + p.h <= ARENA_H && !hitsWall(p.x, ny, p.w, p.h)) p.y = ny;
+      // Bodies cannot overlap. A shielded circle passes through everyone, and
+      // bodies already overlapping (e.g. a square dashed onto someone) may
+      // move freely until they come apart.
+      const ghost = p.shieldTicks > 0 || hitsBody(room, id, p.x, p.y, p.w, p.h);
+      const blocked = (x, y) => x < 0 || y < 0 || x + p.w > ARENA_W || y + p.h > ARENA_H ||
+        hitsWall(x, y, p.w, p.h) || (!ghost && hitsBody(room, id, x, y, p.w, p.h));
+      // Each axis takes its full step, or as much of it as fits so the body
+      // stops flush against whatever is in the way
+      for (const [ax, ay] of [[p.dx * SPEED * speedMult, 0], [0, p.dy * SPEED * speedMult]]) {
+        if (!ax && !ay) continue;
+        for (let f = 10; f > 0; f--) {
+          const nx = p.x + ax * f / 10, ny = p.y + ay * f / 10;
+          if (!blocked(nx, ny)) { p.x = nx; p.y = ny; break; }
+        }
+      }
     }
   }
 
