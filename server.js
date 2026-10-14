@@ -3,7 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const { WebSocketServer } = require('ws');
 
-const PORT = 3636;
+const PORT = Number(process.env.PORT) || 3636;
 
 // ─── Game constants ──────────────────────────────────────────
 const ARENA_W = 80;
