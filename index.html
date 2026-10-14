@@ -1326,75 +1326,20 @@ function strokeCrescent(c) {
   var hy = Math.sqrt(Math.max(0, r * r - b * b / 4));
   var outerA = Math.atan2(hy, -b / 2);  // horn angle on the outer circle
   var innerA = Math.atan2(hy, b / 2);   // horn angle on the inner circle
-  var pulse = 0.85 + 0.15 * Math.sin(frameCounter * 0.5);
   ctx.save();
   ctx.translate(c.x * cellSize, c.y * cellSize);
   ctx.rotate(Math.atan2(c.dy, c.dx));
   ctx.lineJoin = 'round';
-  ctx.lineCap = 'round';
-
-  // Swoosh: thin arcs echoing the outer rim, shorter and fainter behind
+  // Plain outline, like a segmentation polygon
   ctx.strokeStyle = c.color;
-  ctx.shadowColor = c.color;
-  ctx.shadowBlur = 8;
-  for (var g = 1; g <= 4; g++) {
-    ctx.globalAlpha = 0.5 - g * 0.1;
-    ctx.lineWidth = 2.6 - g * 0.45;
-    var ga = outerA * (1 - g * 0.17);
-    ctx.beginPath();
-    ctx.arc(-g * 0.42 * cellSize, 0, r, -ga, ga, false);
-    ctx.stroke();
-  }
-
-  // Rim light: faint inside the hollow, brightest along the outer rim
-  var grad = ctx.createRadialGradient(-b, 0, r, -b, 0, r + b);
-  grad.addColorStop(0, 'rgba(0,0,0,0)');
-  grad.addColorStop(0.6, c.color);
-  grad.addColorStop(1, '#ffffff');
-  ctx.globalAlpha = 0.32 * pulse;
-  ctx.shadowBlur = 0;
-  ctx.fillStyle = grad;
-  crescentPath(r, b, outerA, innerA);
-  ctx.fill();
-
-  // Outline of the moon
-  ctx.globalAlpha = 0.95;
   ctx.lineWidth = 2;
-  ctx.shadowBlur = 14 * pulse;
   crescentPath(r, b, outerA, innerA);
   ctx.stroke();
-
-  // Cutting edge: white along the outer rim, tapering toward the horns
-  ctx.shadowColor = '#ffffff';
-  ctx.strokeStyle = '#ffffff';
-  ctx.shadowBlur = 10;
-  var edge = [[0.55, 0.85, 1.4], [1, 0.5, 2.6]]; // [alpha, arc fraction, width]
-  for (var e = 0; e < edge.length; e++) {
-    ctx.globalAlpha = edge[e][0];
-    ctx.lineWidth = edge[e][2];
-    ctx.beginPath();
-    ctx.arc(0, 0, r - 1.5, -outerA * edge[e][1], outerA * edge[e][1], false);
-    ctx.stroke();
-  }
-
-  // Motes of light shed from the horns, twinkling as it flies
-  ctx.shadowBlur = 6;
-  ctx.shadowColor = c.color;
-  ctx.fillStyle = '#ffffff';
-  for (var m = 0; m < 6; m++) {
-    var side = m % 2 ? 1 : -1;
-    var t = (m >> 1) + 1;                 // 1..3 steps behind the horn
-    var tw = 0.5 + 0.5 * Math.sin(frameCounter * 0.9 + m * 1.7);
-    ctx.globalAlpha = (0.9 - t * 0.22) * tw;
-    ctx.beginPath();
-    ctx.arc(-b / 2 - t * 0.5 * cellSize, side * (hy - t * 3), 1.6 - t * 0.3, 0, Math.PI * 2);
-    ctx.fill();
-  }
   ctx.restore();
 }
 
-// Upgraded rectangle bullets: a slim tracer dart, or a double-chevron
-// arrowhead for the big shot, both pointing along their flight
+// Upgraded rectangle bullets: a slim dart, or a chevron for the big shot,
+// both pointing along their flight
 function strokeTwinBullet(b, bpx, bpy, bsz) {
   var ang = Math.atan2(b.vy || 0, b.vx || 1);
   ctx.save();
@@ -1402,225 +1347,76 @@ function strokeTwinBullet(b, bpx, bpy, bsz) {
   ctx.rotate(ang);
   ctx.strokeStyle = b.color;
   ctx.lineJoin = 'round';
-  ctx.lineCap = 'round';
-  ctx.shadowColor = b.color;
-  ctx.shadowBlur = 8;
+  ctx.beginPath();
   if (!b.big) {
     var L = Math.max(bsz * 2.6, 15), Wd = Math.max(bsz * 0.9, 6);
-    // Dart body
-    ctx.lineWidth = 2;
-    ctx.beginPath();
+    ctx.lineWidth = 1.5;
     ctx.moveTo(L / 2, 0);
     ctx.lineTo(0, -Wd / 2);
     ctx.lineTo(-L / 2, 0);
     ctx.lineTo(0, Wd / 2);
     ctx.closePath();
-    ctx.stroke();
-    // Tracer tail
-    ctx.globalAlpha = 0.45;
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(-L / 2, 0);
-    ctx.lineTo(-L * 1.4, 0);
-    ctx.stroke();
   } else {
-    var s = Math.max(bsz * 1.2, 18);
+    var sz = Math.max(bsz * 1.2, 18);
     ctx.lineWidth = 2.5;
-    // Double chevron, the leading one brighter
-    for (var k = 0; k < 2; k++) {
-      var off = -k * s * 0.55;
-      ctx.globalAlpha = k ? 0.55 : 1;
-      ctx.beginPath();
-      ctx.moveTo(off - s * 0.45, -s * 0.6);
-      ctx.lineTo(off + s * 0.45, 0);
-      ctx.lineTo(off - s * 0.45, s * 0.6);
-      ctx.stroke();
-    }
-    // Core diamond
-    ctx.globalAlpha = 1;
-    ctx.lineWidth = 1.5;
-    ctx.strokeStyle = '#ffffff';
-    ctx.beginPath();
-    ctx.moveTo(s * 0.2, 0);
-    ctx.lineTo(0, -s * 0.16);
-    ctx.lineTo(-s * 0.2, 0);
-    ctx.lineTo(0, s * 0.16);
-    ctx.closePath();
-    ctx.stroke();
-    // Two exhaust streaks from the chevron tips
-    ctx.strokeStyle = b.color;
-    ctx.globalAlpha = 0.35;
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(-s * 1.0, -s * 0.6); ctx.lineTo(-s * 2.0, -s * 0.6);
-    ctx.moveTo(-s * 1.0, s * 0.6); ctx.lineTo(-s * 2.0, s * 0.6);
-    ctx.stroke();
+    ctx.moveTo(-sz * 0.45, -sz * 0.6);
+    ctx.lineTo(sz * 0.45, 0);
+    ctx.lineTo(-sz * 0.45, sz * 0.6);
   }
+  ctx.stroke();
   ctx.restore();
 }
 
-// Square dash: ghost outlines along the path, speed lines from the
-// corners and corner brackets snapping outward at the landing spot
+// Square dash: a dashed track line from the start box, like a tracking tool
 function strokeDash(d) {
   var t = 1 - d.life / d.maxLife; // 0 → 1 over the trail lifetime
   var x1 = d.x1 * cellSize, y1 = d.y1 * cellSize;
   var x2 = d.x2 * cellSize, y2 = d.y2 * cellSize;
   var half = (d.size || 3) * cellSize / 2;
-  var len = Math.hypot(x2 - x1, y2 - y1) || 1;
-  var ux = (x2 - x1) / len, uy = (y2 - y1) / len;
   ctx.save();
   ctx.strokeStyle = d.color;
-  ctx.lineJoin = 'miter';
-  ctx.lineCap = 'round';
-
-  // Speed lines: from each side of the box, fading toward the start
-  var grad = ctx.createLinearGradient(x1, y1, x2, y2);
-  grad.addColorStop(0, 'rgba(0,0,0,0)');
-  grad.addColorStop(1, d.color);
-  ctx.strokeStyle = grad;
-  ctx.globalAlpha = 0.9 * (1 - t);
-  var lanes = [-0.9, -0.35, 0.35, 0.9];
-  for (var l = 0; l < lanes.length; l++) {
-    var ox = -uy * half * lanes[l], oy = ux * half * lanes[l];
-    var shrink = t * len * 0.8;          // tail catches up with the head
-    ctx.lineWidth = l === 0 || l === 3 ? 2 : 1;
-    ctx.beginPath();
-    ctx.moveTo(x1 + ux * shrink + ox, y1 + uy * shrink + oy);
-    ctx.lineTo(x2 - ux * half + ox, y2 - uy * half + oy);
-    ctx.stroke();
-  }
-
-  // Ghost outlines, older ones fainter and slightly smaller
-  ctx.strokeStyle = d.color;
-  var ghosts = 4;
-  for (var g = 0; g < ghosts; g++) {
-    var f = g / ghosts;                  // 0 = start of the path
-    var gx = x1 + (x2 - x1) * f, gy = y1 + (y2 - y1) * f;
-    var gh = half * (0.7 + 0.3 * f);
-    ctx.globalAlpha = (0.15 + 0.45 * f) * (1 - t);
-    ctx.lineWidth = 1.5;
-    ctx.strokeRect(gx - gh, gy - gh, gh * 2, gh * 2);
-  }
-
-  // Landing: corner brackets fly outward and fade
-  var spread = half + 4 + t * 14;
-  var cl = Math.max(4, half * 0.5 * (1 - t * 0.5));
-  ctx.globalAlpha = 1 - t;
-  ctx.lineWidth = 3;
-  ctx.shadowColor = d.color;
-  ctx.shadowBlur = 10;
-  for (var c = 0; c < 4; c++) {
-    var sx = c & 1 ? 1 : -1, sy = c & 2 ? 1 : -1;
-    var cx = x2 + sx * spread, cy = y2 + sy * spread;
-    ctx.beginPath();
-    ctx.moveTo(cx - sx * cl, cy);
-    ctx.lineTo(cx, cy);
-    ctx.lineTo(cx, cy - sy * cl);
-    ctx.stroke();
-  }
+  ctx.globalAlpha = 0.6 * (1 - t);
+  ctx.lineWidth = 1;
+  ctx.setLineDash([4, 4]);
+  ctx.strokeRect(x1 - half, y1 - half, half * 2, half * 2);
+  ctx.beginPath();
+  ctx.moveTo(x1, y1);
+  ctx.lineTo(x2, y2);
+  ctx.stroke();
   ctx.restore();
 }
 
-// Shield blast: a white flash, the shield ring breaking into arcs that
-// fly apart, a shockwave out to the blast reach and radial sparks
+// Shield blast: one thin ring expanding to the blast reach
 function strokeBlast(bl) {
   var t = 1 - bl.life / bl.maxLife;    // 0 → 1 over the blast lifetime
   var ease = 1 - (1 - t) * (1 - t);    // fast start, soft finish
-  var x = bl.x * cellSize, y = bl.y * cellSize;
   var r0 = bl.r0 * cellSize, r = bl.r * cellSize;
   ctx.save();
-  ctx.lineCap = 'round';
-  ctx.shadowColor = bl.color;
-
-  // Flash: the shield edge burns white for an instant
-  if (t < 0.35) {
-    ctx.globalAlpha = 1 - t / 0.35;
-    ctx.strokeStyle = '#ffffff';
-    ctx.lineWidth = 4;
-    ctx.shadowBlur = 20;
-    ctx.beginPath();
-    ctx.arc(x, y, r0 * (1 + t * 0.3), 0, Math.PI * 2);
-    ctx.stroke();
-  }
-
-  // Shockwave: thick leading ring and a thin dashed echo behind it
   ctx.strokeStyle = bl.color;
-  ctx.shadowBlur = 14;
-  ctx.globalAlpha = 0.95 * (1 - t);
-  ctx.lineWidth = 1 + 4 * (1 - t);
-  ctx.beginPath();
-  ctx.arc(x, y, r0 + (r - r0) * ease, 0, Math.PI * 2);
-  ctx.stroke();
-  ctx.globalAlpha = 0.6 * (1 - t);
-  ctx.lineWidth = 1.2;
-  ctx.setLineDash([5, 4]);
-  ctx.beginPath();
-  ctx.arc(x, y, r0 + (r - r0) * ease * 0.6, 0, Math.PI * 2);
-  ctx.stroke();
-  ctx.setLineDash([]);
-
-  // Shield shell breaks into arcs that drift out and spin
-  var pieces = 8;
-  ctx.shadowBlur = 8;
-  ctx.lineWidth = 2.5 * (1 - t * 0.6);
-  for (var i = 0; i < pieces; i++) {
-    var mid = (i + 0.5) / pieces * Math.PI * 2 + t * (i % 2 ? 0.6 : -0.6);
-    var span = (Math.PI / pieces) * (0.8 - t * 0.5);
-    var pr = r0 + (r - r0) * 0.55 * ease; // trails behind the shockwave
-    ctx.globalAlpha = 0.9 * (1 - t);
-    ctx.beginPath();
-    ctx.arc(x, y, pr, mid - span, mid + span);
-    ctx.stroke();
-  }
-
-  // Radial sparks shooting past the shockwave
-  var sparks = 14;
+  ctx.globalAlpha = 0.8 * (1 - t);
   ctx.lineWidth = 1.5;
-  ctx.shadowBlur = 6;
-  for (var k = 0; k < sparks; k++) {
-    var a = (k / sparks) * Math.PI * 2 + (k % 3) * 0.13;
-    var reach = r * (1 + 0.3 * ((k * 7) % 5) / 4);
-    var head = r0 * 0.9 + (reach - r0 * 0.9) * ease;
-    var tail = head - (r - r0 + 10) * 0.8 * (1 - t);
-    ctx.globalAlpha = 1 - t;
-    ctx.strokeStyle = k % 2 ? '#ffffff' : bl.color;
-    ctx.beginPath();
-    ctx.moveTo(x + Math.cos(a) * tail, y + Math.sin(a) * tail);
-    ctx.lineTo(x + Math.cos(a) * head, y + Math.sin(a) * head);
-    ctx.stroke();
-  }
+  ctx.beginPath();
+  ctx.arc(bl.x * cellSize, bl.y * cellSize, r0 + (r - r0) * ease, 0, Math.PI * 2);
+  ctx.stroke();
   ctx.restore();
 }
 
-// Spawn protection: seven rainbow arcs spinning around the body, fading out
-// as the protection runs down
+// Spawn protection: a thin seven-colour ring, fading as protection runs down
 var SPAWN_RING_COLORS = ['#FF3B30', '#FF9500', '#FFD60A', '#34C759', '#00C7FF', '#3F51FF', '#AF52DE'];
 function strokeSpawnShield(p, px, py, pw, ph) {
   var k = p.spawnTicks / (p.spawnMax || 10); // 1 → 0
   var cx = px + pw / 2, cy = py + ph / 2;
-  var r = Math.hypot(pw, ph) / 2 + 6;
+  var r = Math.hypot(pw, ph) / 2 + 4;
   var n = SPAWN_RING_COLORS.length;
-  var spin = frameCounter * 0.35;
   var seg = (Math.PI * 2) / n;
   ctx.save();
-  ctx.lineCap = 'round';
-  ctx.lineWidth = 3;
-  ctx.shadowBlur = 10;
+  ctx.lineWidth = 1.5;
+  ctx.globalAlpha = 0.3 + 0.5 * k;
   for (var i = 0; i < n; i++) {
-    var a = spin + i * seg;
-    ctx.globalAlpha = 0.35 + 0.6 * k;
     ctx.strokeStyle = SPAWN_RING_COLORS[i];
-    ctx.shadowColor = SPAWN_RING_COLORS[i];
     ctx.beginPath();
-    ctx.arc(cx, cy, r, a, a + seg * 0.8);
+    ctx.arc(cx, cy, r, i * seg, i * seg + seg * 0.8);
     ctx.stroke();
-    // Faint inner echo turning the other way
-    ctx.globalAlpha = 0.25 * k;
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    ctx.arc(cx, cy, r - 4, -spin * 1.3 + i * seg, -spin * 1.3 + i * seg + seg * 0.6);
-    ctx.stroke();
-    ctx.lineWidth = 3;
   }
   ctx.restore();
 }
@@ -1628,7 +1424,7 @@ function strokeSpawnShield(p, px, py, pw, ph) {
 // ─── Items: heal (green plus), speed (blue arrow), damage (red burst) ───
 var ITEM_COLORS = { heal: '#34C759', speed: '#00C7FF', damage: '#FF3B30' };
 var ITEM_LABELS = { heal: 'hp +2', speed: 'motion', damage: 'dmg x1.5' };
-var ITEM_POP_TICKS = 12; // rainbow pop-in after an item drops
+var ITEM_POP_TICKS = 12; // rainbow blink after an item drops
 
 function itemIconPath(kind, cx, cy, s) {
   ctx.beginPath();
@@ -1661,125 +1457,38 @@ function itemIconPath(kind, cx, cy, s) {
 function strokeItem(it) {
   var sz = it.size * cellSize;
   var x = it.x * cellSize, y = it.y * cellSize;
-  var cx = x + sz / 2, cy = y + sz / 2;
   var color = ITEM_COLORS[it.kind];
-  var pop = it.age < ITEM_POP_TICKS ? it.age / ITEM_POP_TICKS : 1; // 0 → 1
-  // Blinks faster and faster over its last 2s before vanishing
-  var left = it.life - it.age;
-  if (left < 40 && Math.floor(frameCounter / (left < 20 ? 2 : 4)) % 2) return;
-  var n = SPAWN_RING_COLORS.length;
+  // Blinks once through the seven colours as it drops in
+  if (it.age < ITEM_POP_TICKS) color = SPAWN_RING_COLORS[it.age % SPAWN_RING_COLORS.length];
   ctx.save();
+  // Fades out over its last 2s before vanishing
+  var left = it.life - it.age;
+  if (left < 40) ctx.globalAlpha = 0.2 + 0.8 * left / 40;
+  ctx.strokeStyle = color;
   ctx.lineJoin = 'round';
-  ctx.lineCap = 'round';
-
-  if (pop < 1) {
-    // Pops in: a burst of seven rainbow rays and a rainbow ring snapping out
-    var ease = 1 - (1 - pop) * (1 - pop);
-    for (var i = 0; i < n; i++) {
-      var ang = (i / n) * Math.PI * 2 + 0.3;
-      var r1 = sz * (0.4 + 1.1 * ease), r2 = r1 + sz * 0.7 * (1 - pop);
-      ctx.globalAlpha = 1 - pop;
-      ctx.strokeStyle = SPAWN_RING_COLORS[i];
-      ctx.shadowColor = SPAWN_RING_COLORS[i];
-      ctx.shadowBlur = 16;
-      ctx.lineWidth = 7;
-      ctx.beginPath();
-      ctx.moveTo(cx + Math.cos(ang) * r1, cy + Math.sin(ang) * r1);
-      ctx.lineTo(cx + Math.cos(ang) * r2, cy + Math.sin(ang) * r2);
-      ctx.stroke();
-      ctx.beginPath();
-      ctx.arc(cx, cy, sz * (0.5 + 0.8 * ease), ang, ang + (Math.PI * 2) / n * 0.85);
-      ctx.stroke();
-    }
-    // The icon blinks through the seven colours before settling
-    color = SPAWN_RING_COLORS[it.age % n];
-  }
-
-  // Beacon: a ring pulses out from the item every 1.5s so it catches the eye
-  var beat = ((frameCounter + it.id * 11) % 30) / 30;
-  ctx.globalAlpha = 0.8 * (1 - beat);
-  ctx.strokeStyle = color;
-  ctx.shadowColor = color;
-  ctx.shadowBlur = 12;
-  ctx.lineWidth = 4 * (1 - beat) + 1;
-  ctx.beginPath();
-  ctx.arc(cx, cy, sz * (0.75 + 0.6 * beat), 0, Math.PI * 2);
-  ctx.stroke();
-
-  // Icon: thick dark halo under a bright coloured outline with a white core
-  var bob = Math.sin((frameCounter + it.id * 7) * 0.15) * 3;
-  var scale = pop < 1 ? 0.4 + 0.8 * pop - 0.2 * Math.max(0, pop - 0.75) * 4 : 1;
-  var iy = cy + bob, isz = sz * scale;
-  ctx.globalAlpha = 1;
-  ctx.shadowBlur = 0;
-  ctx.strokeStyle = 'rgba(0,0,0,0.85)';
-  ctx.lineWidth = 11;
-  itemIconPath(it.kind, cx, iy, isz);
-  ctx.stroke();
-  ctx.strokeStyle = color;
-  ctx.shadowColor = color;
-  ctx.shadowBlur = 12 + 8 * (0.5 + 0.5 * Math.sin(frameCounter * 0.2 + it.id));
-  ctx.lineWidth = 6;
-  itemIconPath(it.kind, cx, iy, isz);
-  ctx.stroke();
-  ctx.shadowBlur = 0;
-  ctx.strokeStyle = '#ffffff';
-  ctx.globalAlpha = 0.85;
   ctx.lineWidth = 2;
-  itemIconPath(it.kind, cx, iy, isz);
+  itemIconPath(it.kind, x + sz / 2, y + sz / 2, sz * 0.75);
   ctx.stroke();
-
-  // Annotation-style corner brackets and a label tag above
-  var pad = 5, bx = x - pad, by = y - pad + bob, bw = sz + pad * 2, cl = sz * 0.28;
-  ctx.globalAlpha = 1;
-  ctx.strokeStyle = color;
-  ctx.lineWidth = 4;
-  for (var c = 0; c < 4; c++) {
-    var sx = c & 1 ? 1 : 0, sy = c & 2 ? 1 : 0;
-    var kx = bx + sx * bw, ky = by + sy * bw;
-    var dx = sx ? -1 : 1, dy = sy ? -1 : 1;
-    ctx.beginPath();
-    ctx.moveTo(kx + dx * cl, ky);
-    ctx.lineTo(kx, ky);
-    ctx.lineTo(kx, ky + dy * cl);
-    ctx.stroke();
-  }
-  ctx.font = 'bold 16px Consolas, Monaco, monospace';
+  // Thin box and a small class label, like any other detection
+  ctx.lineWidth = 1;
+  ctx.strokeRect(x, y, sz, sz);
+  ctx.fillStyle = color;
+  ctx.font = '9px Consolas, Monaco, monospace';
   ctx.textAlign = 'left';
   ctx.textBaseline = 'bottom';
-  var label = ITEM_LABELS[it.kind];
-  var tw = ctx.measureText(label).width;
-  ctx.fillStyle = 'rgba(0,0,0,0.8)';
-  ctx.fillRect(bx, by - 23, tw + 10, 21);
-  ctx.fillStyle = color;
-  ctx.fillText(label, bx + 5, by - 4);
+  ctx.fillText(ITEM_LABELS[it.kind], x, y - 2);
   ctx.restore();
 }
 
-// Pickup: the icon swells and fades while a ring pulses out
+// Pickup: the box outline grows and fades
 function strokePickup(pk) {
   var t = 1 - pk.life / pk.maxLife;
-  var color = ITEM_COLORS[pk.kind];
-  var cx = pk.x * cellSize, cy = pk.y * cellSize;
-  var base = 1.8 * cellSize;
+  var half = 1.8 * cellSize / 2 * (1 + t * 0.6);
   ctx.save();
-  ctx.lineJoin = 'round';
-  ctx.strokeStyle = color;
-  ctx.shadowColor = color;
-  ctx.shadowBlur = 12;
+  ctx.strokeStyle = ITEM_COLORS[pk.kind];
   ctx.globalAlpha = 1 - t;
-  ctx.lineWidth = 6;
-  itemIconPath(pk.kind, cx, cy - t * 18, base * (1 + t));
-  ctx.stroke();
-  ctx.lineWidth = 8 * (1 - t) + 1;
-  ctx.beginPath();
-  ctx.arc(cx, cy, base * (0.6 + 1.6 * t), 0, Math.PI * 2);
-  ctx.stroke();
-  ctx.fillStyle = color;
-  ctx.font = 'bold 18px Consolas, Monaco, monospace';
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'bottom';
-  ctx.fillText(ITEM_LABELS[pk.kind], cx, cy - base * 0.8 - t * 30);
+  ctx.lineWidth = 1;
+  ctx.strokeRect(pk.x * cellSize - half, pk.y * cellSize - half, half * 2, half * 2);
   ctx.restore();
 }
 
@@ -2077,11 +1786,10 @@ function render() {
       ctx.fillStyle = ITEM_COLORS.damage;
       ctx.fillText('dmg x1.5 ' + Math.ceil(p.damageTicks / 20) + 's', px + 3, tagY);
       ctx.save();
-      ctx.globalAlpha = 0.35 + 0.25 * Math.sin(frameCounter * 0.5);
+      ctx.globalAlpha = 0.5;
       ctx.strokeStyle = ITEM_COLORS.damage;
-      ctx.lineWidth = 1.5;
-      ctx.shadowColor = ITEM_COLORS.damage;
-      ctx.shadowBlur = 8;
+      ctx.lineWidth = 1;
+      ctx.setLineDash([3, 3]);
       strokeShape(ctx, px - 4, py - 4, pw + 8, ph + 8, shape);
       ctx.restore();
     }
