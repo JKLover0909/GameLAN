@@ -1367,7 +1367,7 @@ function strokeTwinBullet(b, bpx, bpy, bsz) {
   ctx.restore();
 }
 
-// Square dash: a dashed track line from the start box, like a tracking tool
+// Square dash: a solid track line from the start box, like a tracking tool
 function strokeDash(d) {
   var t = 1 - d.life / d.maxLife; // 0 → 1 over the trail lifetime
   var x1 = d.x1 * cellSize, y1 = d.y1 * cellSize;
@@ -1375,10 +1375,11 @@ function strokeDash(d) {
   var half = (d.size || 3) * cellSize / 2;
   ctx.save();
   ctx.strokeStyle = d.color;
-  ctx.globalAlpha = 0.6 * (1 - t);
-  ctx.lineWidth = 1;
-  ctx.setLineDash([4, 4]);
+  ctx.globalAlpha = 1 - t * 0.8;
+  ctx.lineWidth = 3;
   ctx.strokeRect(x1 - half, y1 - half, half * 2, half * 2);
+  ctx.lineWidth = 7;
+  ctx.lineCap = 'round';
   ctx.beginPath();
   ctx.moveTo(x1, y1);
   ctx.lineTo(x2, y2);
