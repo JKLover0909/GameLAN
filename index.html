@@ -1409,8 +1409,8 @@ document.addEventListener('mousemove', function(e) {
 function renderLoop(now) {
   requestAnimationFrame(renderLoop);
   if (now < nextFrameTime - 1) return;
-  nextFrameTime += 1000 / 60;
-  if (nextFrameTime < now) nextFrameTime = now + 1000 / 60;
+  nextFrameTime += 1000 / 30;
+  if (nextFrameTime < now) nextFrameTime = now + 1000 / 30;
   render(now);
   fpsFrameCount++;
   if (now - fpsWindowStart >= 1000) {
