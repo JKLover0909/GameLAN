@@ -367,7 +367,7 @@ function useSkill(room, id, p, tx, ty) {
     const dist = Math.hypot(ddx, ddy);
     if (dist < 0.1) return;
     p.skillCooldown = SKILL_COOLDOWN.triangle;
-    room.crescents.push({ x: c.x, y: c.y, dx: ddx / dist, dy: ddy / dist, ownerId: id, team: p.team, color: p.color, life: CRESCENT_LIFE, hitIds: new Set() });
+    room.crescents.push({ id: nextBulletId++, x: c.x, y: c.y, dx: ddx / dist, dy: ddy / dist, ownerId: id, team: p.team, color: p.color, life: CRESCENT_LIFE, hitIds: new Set() });
   } else if (p.shape === 'square') {
     const start = bodyCenter(p);
     const ddx = tx - start.x;
@@ -489,7 +489,7 @@ function gameState(room) {
     dashes: room.dashes.map(d => ({ ...d, maxLife: DASH_DISPLAY_TICKS })),
     blasts: room.blasts.map(b => ({ ...b, maxLife: BLAST_DISPLAY_TICKS })),
     crescents: room.crescents.map(c => ({
-      x: c.x, y: c.y, dx: c.dx, dy: c.dy, color: c.color, ownerId: c.ownerId,
+      id: c.id, x: c.x, y: c.y, dx: c.dx, dy: c.dy, color: c.color, ownerId: c.ownerId,
       r: CRESCENT.r, back: CRESCENT.back,
     })),
     items: room.items.map(it => ({ id: it.id, kind: it.kind, x: it.x, y: it.y, size: ITEM_SIZE, age: it.age, life: ITEM_LIFE_TICKS })),

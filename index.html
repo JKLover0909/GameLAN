@@ -533,7 +533,7 @@
     <div>Threshold: 0.75</div>
     <div>NMS IoU: 0.45</div>
     <div>Frame: <span id="frameNum">0</span></div>
-    <div id="fpsDisplay">FPS: 20</div>
+    <div id="fpsDisplay">FPS: --</div>
   </div>
 </div>
 
@@ -573,14 +573,146 @@ let gameBlasts = [];
 let gameCrescents = [];
 let gameItems = [];
 let gamePickups = [];
+let snapshots = [];
+let viewPlayers = [];
+let viewBullets = [];
+let viewBeams = [];
+let viewDashes = [];
+let viewBlasts = [];
+let viewCrescents = [];
+let viewItems = [];
+let viewPickups = [];
+let lastRenderedSnapshot = null;
+const INTERP_DELAY_MS = 75;
+const SNAPSHOT_LIMIT = 5;
 let walls = []; // [{x, y, w, h}] map terrain from server
 let palette = []; // [{color, name}] from server
 let ws;
 let keysDown = new Set();
 let frameCounter = 0;
+let nextFrameTime = 0;
+let fpsFrameCount = 0;
+let fpsWindowStart = performance.now();
 let mouseX = 80, mouseY = 45;
 let myShotCount = 0;
 let isCharging = false;
+
+function makeSnapshot(t, source) {
+  return {
+    t: t,
+    players: source.players || [],
+    bullets: source.bullets || [],
+    beams: source.beams || [],
+    dashes: source.dashes || [],
+    blasts: source.blasts || [],
+    crescents: source.crescents || [],
+    items: source.items || [],
+    pickups: source.pickups || []
+  };
+}
+
+function pushSnapshot(snapshot) {
+  snapshots.push(snapshot);
+  if (snapshots.length > SNAPSHOT_LIMIT) snapshots.shift();
+}
+
+function copyWithFractionalLife(list, field, amount) {
+  return list.map(function(item) {
+    var copy = Object.assign({}, item);
+    if (typeof copy[field] === 'number') copy[field] -= amount;
+    return copy;
+  });
+}
+
+function interpolateById(beforeList, afterList, alpha, kind) {
+  var afterById = new Map();
+  for (var i = 0; i < afterList.length; i++) afterById.set(afterList[i].id, afterList[i]);
+  return beforeList.map(function(before, index) {
+    var view = Object.assign({}, before);
+    var after = before.id == null ? afterList[index] : afterById.get(before.id);
+    if (after) {
+      var dx = after.x - before.x;
+      var dy = after.y - before.y;
+      var discontinuous = kind === 'player'
+        ? before.dead !== after.dead || before.joining !== after.joining || Math.hypot(dx, dy) > 3
+        : false;
+      if (!discontinuous) {
+        view.x += dx * alpha;
+        view.y += dy * alpha;
+      }
+      if (kind === 'crescent') {
+        view.dx += (after.dx - before.dx) * alpha;
+        view.dy += (after.dy - before.dy) * alpha;
+      }
+      if (kind === 'player') {
+        if (typeof before.chargeProgress === 'number' && typeof after.chargeProgress === 'number') {
+          view.chargeProgress += (after.chargeProgress - before.chargeProgress) * alpha;
+        }
+        if (typeof before.joinProgress === 'number' && typeof after.joinProgress === 'number') {
+          view.joinProgress += (after.joinProgress - before.joinProgress) * alpha;
+        }
+        ['spawnTicks', 'shieldTicks', 'upgradeTicks', 'speedTicks', 'damageTicks'].forEach(function(field) {
+          if (typeof before[field] === 'number' && typeof after[field] === 'number') {
+            view[field] += (after[field] - before[field]) * alpha;
+          }
+        });
+      }
+    } else if (kind === 'bullet') {
+      view.x += (before.vx || 0) * alpha;
+      view.y += (before.vy || 0) * alpha;
+    } else if (kind === 'crescent') {
+      view.x += before.dx * 3.25 * alpha;
+      view.y += before.dy * 3.25 * alpha;
+    }
+    return view;
+  });
+}
+
+function buildRenderView(now) {
+  if (!snapshots.length) {
+    viewPlayers = players;
+    viewBullets = bullets;
+    viewBeams = gameBeams;
+    viewDashes = gameDashes;
+    viewBlasts = gameBlasts;
+    viewCrescents = gameCrescents;
+    viewItems = gameItems;
+    viewPickups = gamePickups;
+    return;
+  }
+
+  var renderTime = Math.max(snapshots[0].t, now - INTERP_DELAY_MS);
+  var first = snapshots[0];
+  var last = snapshots[snapshots.length - 1];
+  var before = first;
+  var after = null;
+  if (renderTime >= last.t) {
+    before = last;
+  } else if (renderTime > first.t) {
+    for (var i = 1; i < snapshots.length; i++) {
+      if (renderTime <= snapshots[i].t) {
+        before = snapshots[i - 1];
+        after = snapshots[i];
+        break;
+      }
+    }
+  }
+
+  if (lastRenderedSnapshot && lastRenderedSnapshot !== before) {
+    spawnDeathShards(lastRenderedSnapshot.players, before.players);
+  }
+  lastRenderedSnapshot = before;
+
+  var alpha = after ? Math.max(0, Math.min(1, (renderTime - before.t) / (after.t - before.t))) : 0;
+  viewPlayers = after ? interpolateById(before.players, after.players, alpha, 'player') : before.players;
+  viewBullets = after ? interpolateById(before.bullets, after.bullets, alpha, 'bullet') : before.bullets;
+  viewCrescents = after ? interpolateById(before.crescents, after.crescents, alpha, 'crescent') : before.crescents;
+  viewBeams = after ? copyWithFractionalLife(before.beams, 'life', alpha) : before.beams;
+  viewDashes = after ? copyWithFractionalLife(before.dashes, 'life', alpha) : before.dashes;
+  viewBlasts = after ? copyWithFractionalLife(before.blasts, 'life', alpha) : before.blasts;
+  viewPickups = after ? copyWithFractionalLife(before.pickups, 'life', alpha) : before.pickups;
+  viewItems = after ? copyWithFractionalLife(before.items, 'age', -alpha) : before.items;
+}
 
 // Client state machine: 'connecting' | 'mode' | 'lobby' | 'joining' | 'alive' | 'dead'
 let clientState = 'connecting';
@@ -614,7 +746,7 @@ function setBackground(file) {
   var img = new Image();
   img.onload = function() {
     if (selectedBg !== file) return; // a newer pick won the race
-    bgImage = img; bgLoaded = true; render();
+    bgImage = img; bgLoaded = true;
   };
   img.onerror = function() {
     if (file !== BG_DEFAULT) setBackground(BG_DEFAULT);
@@ -681,13 +813,14 @@ function connect() {
   ws.onopen = function() {
     resetInputState();
     resizeCanvas();
-    render();
   };
 
   ws.onmessage = function(e) {
     var msg = JSON.parse(e.data);
 
     if (msg.type === 'modes') {
+      snapshots = [];
+      lastRenderedSnapshot = null;
       if (msg.id != null) myId = msg.id;
       currentMode = null;
       teams = null;
@@ -697,7 +830,6 @@ function connect() {
       determineClientState();
       updateOverlay();
       updateUI();
-      render();
       return;
     }
 
@@ -723,6 +855,9 @@ function connect() {
       gameCrescents = msg.crescents || [];
       gameItems = msg.items || [];
       gamePickups = msg.pickups || [];
+      snapshots = [];
+      lastRenderedSnapshot = null;
+      pushSnapshot(makeSnapshot(performance.now(), msg));
       walls = msg.walls || [];
       if (msg.palette) palette = msg.palette;
       resizeCanvas();
@@ -739,7 +874,7 @@ function connect() {
         arenaH = msg.arena.h;
         cellSize = msg.arena.cell;
       }
-      spawnDeathShards(players, msg.players);
+      pushSnapshot(makeSnapshot(performance.now(), msg));
       players = msg.players;
       bullets = msg.bullets || [];
       gameBeams = msg.beams || [];
@@ -754,7 +889,6 @@ function connect() {
       determineClientState();
       updateOverlay();
       updateUI();
-      render();
       return;
     }
 
@@ -785,7 +919,12 @@ function connect() {
     bullets = [];
     gameBeams = [];
     gameDashes = [];
+    gameBlasts = [];
     gameCrescents = [];
+    gameItems = [];
+    gamePickups = [];
+    snapshots = [];
+    lastRenderedSnapshot = null;
     palette = [];
     lobbyPaletteKey = '';
     currentMode = null;
@@ -1244,7 +1383,7 @@ function resizeCanvas() {
   canvas.style.width = Math.floor(gameW * scale) + 'px';
   canvas.style.height = Math.floor(gameH * scale) + 'px';
 }
-window.addEventListener('resize', function() { resizeCanvas(); render(); });
+window.addEventListener('resize', function() { resizeCanvas(); });
 
 // ─── Mouse tracking ─────────────────────────────────────────
 document.addEventListener('mousemove', function(e) {
@@ -1266,6 +1405,21 @@ document.addEventListener('mousemove', function(e) {
 });
 
 // ─── Rendering ───────────────────────────────────────────────
+
+function renderLoop(now) {
+  requestAnimationFrame(renderLoop);
+  if (now < nextFrameTime - 1) return;
+  nextFrameTime += 1000 / 60;
+  if (nextFrameTime < now) nextFrameTime = now + 1000 / 60;
+  render(now);
+  fpsFrameCount++;
+  if (now - fpsWindowStart >= 1000) {
+    document.getElementById('fpsDisplay').textContent = 'FPS: ' + Math.round(fpsFrameCount * 1000 / (now - fpsWindowStart));
+    fpsFrameCount = 0;
+    fpsWindowStart = now;
+  }
+}
+requestAnimationFrame(renderLoop);
 
 // Get clip path for a player's shape on the canvas context
 function applyShapeClip(ctx, px, py, pw, ph, shape) {
@@ -1460,7 +1614,7 @@ function strokeItem(it) {
   var x = it.x * cellSize, y = it.y * cellSize;
   var color = ITEM_COLORS[it.kind];
   // Blinks once through the seven colours as it drops in
-  if (it.age < ITEM_POP_TICKS) color = SPAWN_RING_COLORS[it.age % SPAWN_RING_COLORS.length];
+  if (it.age < ITEM_POP_TICKS) color = SPAWN_RING_COLORS[Math.floor(it.age) % SPAWN_RING_COLORS.length];
   ctx.save();
   // Fades out over its last 2s before vanishing
   var left = it.life - it.age;
@@ -1592,7 +1746,8 @@ function drawCornerMarkers(ctx, px, py, pw, ph, color) {
   ctx.stroke();
 }
 
-function render() {
+function render(now) {
+  buildRenderView(typeof now === 'number' ? now : performance.now());
   var W = canvas.width;
   var H = canvas.height;
   if (W === 0 || H === 0) return;
@@ -1626,11 +1781,11 @@ function render() {
   }
 
   // ── Draw items ──
-  for (var iti = 0; iti < gameItems.length; iti++) strokeItem(gameItems[iti]);
+  for (var iti = 0; iti < viewItems.length; iti++) strokeItem(viewItems[iti]);
 
   // ── Draw bullets ──
-  for (var bi = 0; bi < bullets.length; bi++) {
-    var b = bullets[bi];
+  for (var bi = 0; bi < viewBullets.length; bi++) {
+    var b = viewBullets[bi];
     var bpx = b.x * cellSize;
     var bpy = b.y * cellSize;
     var bsz = b.size * cellSize;
@@ -1651,8 +1806,8 @@ function render() {
   }
 
   // ── Draw alive players ──
-  for (var pi = 0; pi < players.length; pi++) {
-    var p = players[pi];
+  for (var pi = 0; pi < viewPlayers.length; pi++) {
+    var p = viewPlayers[pi];
     if (p.dead) continue;
 
     var px = p.x * cellSize;
@@ -1688,7 +1843,7 @@ function render() {
 
       // Fully charged indicator — bright flash
       if (cp >= 1) {
-        var pulse = 0.5 + 0.5 * Math.sin(frameCounter * 0.4);
+        var pulse = 0.5 + 0.5 * Math.sin(performance.now() / 50 * 0.4);
         ctx.globalAlpha = 0.3 + 0.2 * pulse;
         ctx.fillStyle = '#ffffff';
         ctx.fillRect(px, py, pw, ph);
@@ -1697,7 +1852,7 @@ function render() {
 
       // Pulsing glow border when charging (outside clip)
       ctx.save();
-      var pulse2 = 0.5 + 0.5 * Math.sin(frameCounter * 0.4);
+      var pulse2 = 0.5 + 0.5 * Math.sin(performance.now() / 50 * 0.4);
       ctx.globalAlpha = 0.3 + cp * 0.5 * pulse2;
       ctx.strokeStyle = color;
       ctx.lineWidth = 3.5 + cp * 3;
@@ -1808,8 +1963,8 @@ function render() {
   }
 
   // ── Draw dead players ──
-  for (var di = 0; di < players.length; di++) {
-    var dp = players[di];
+  for (var di = 0; di < viewPlayers.length; di++) {
+    var dp = viewPlayers[di];
     if (!dp.dead) continue;
     var dpx = dp.x * cellSize;
     var dpy = dp.y * cellSize;
@@ -1836,20 +1991,20 @@ function render() {
   drawDeathShards();
 
   // ── Draw square dash trails ──
-  for (var dsi = 0; dsi < gameDashes.length; dsi++) strokeDash(gameDashes[dsi]);
+  for (var dsi = 0; dsi < viewDashes.length; dsi++) strokeDash(viewDashes[dsi]);
 
   // ── Draw triangle crescents ──
-  for (var cri = 0; cri < gameCrescents.length; cri++) strokeCrescent(gameCrescents[cri]);
+  for (var cri = 0; cri < viewCrescents.length; cri++) strokeCrescent(viewCrescents[cri]);
 
   // ── Draw shield blasts ──
-  for (var bli = 0; bli < gameBlasts.length; bli++) strokeBlast(gameBlasts[bli]);
+  for (var bli = 0; bli < viewBlasts.length; bli++) strokeBlast(viewBlasts[bli]);
 
   // ── Draw item pickups ──
-  for (var pki = 0; pki < gamePickups.length; pki++) strokePickup(gamePickups[pki]);
+  for (var pki = 0; pki < viewPickups.length; pki++) strokePickup(viewPickups[pki]);
 
   // ── Draw energy beams ──
-  for (var bei = 0; bei < gameBeams.length; bei++) {
-    var beam = gameBeams[bei];
+  for (var bei = 0; bei < viewBeams.length; bei++) {
+    var beam = viewBeams[bei];
     var bsx = beam.x * cellSize;
     var bsy = beam.y * cellSize;
     var fade = beam.life / beam.maxLife;
@@ -1896,7 +2051,10 @@ function render() {
 
   // ── Draw aim line while charging (own player only) ──
   if (isCharging) {
-    var me = getMe();
+    var me = null;
+    for (var mi = 0; mi < viewPlayers.length; mi++) {
+      if (viewPlayers[mi].id === myId) { me = viewPlayers[mi]; break; }
+    }
     if (me && !me.dead) {
       var cx = (me.x + me.w / 2) * cellSize;
       var cy = (me.y + me.h / 2) * cellSize;
